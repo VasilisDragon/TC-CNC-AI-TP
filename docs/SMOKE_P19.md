@@ -1,4 +1,4 @@
-# SMOKE_P19 – Multi‑pass Scheduler
+﻿# SMOKE_P19 " Multi'pass Scheduler
 
 ## Setup
 - Launch the CNCTC desktop app with any valid 3D model available (the bundled sample is fine).
@@ -7,7 +7,7 @@
 ## Steps
 1. Open a small STL/OBJ model and wait for the geometry to load.
 2. In the *Toolpath Settings* dock, ensure the new **Pass Planning** section is visible.
-3. Leave both *Enable roughing pass* and *Enable finishing pass* checked, set *Stock allowance* to `0.4` mm (or `0.016` in), and set *Ramp angle* to `5` deg.
+3. Leave both *Enable roughing pass* and *Enable finishing pass* checked, set *Stock allowance* to `0.4` mm (or `0.016` in), and set *Ramp angle* to `5` deg.
 4. Choose any flat endmill tool and click **Generate Toolpath**.
 5. After generation completes, inspect the passes in the viewer and the console log.
 

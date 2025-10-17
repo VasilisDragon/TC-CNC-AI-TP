@@ -1,4 +1,4 @@
-# Training Environment
+ï»¿# Training Environment
 
 The Training Environment manager prepares a self-contained Python stack that mirrors the runtime requirements for model training. Everything is stored in `runtime/` next to the application and can be regenerated at any time.
 
@@ -10,7 +10,7 @@ The Training Environment manager prepares a self-contained Python stack that mir
   - `onnxruntime-gpu` (or `onnxruntime` for CPU-only setups)
   - `cadquery`, `build123d`
   - `trimesh`, `numpy`, `matplotlib`
-- The environment footprint is approximately **3.5–6.0 GB** depending on whether CUDA toolkits are downloaded.
+- The environment footprint is approximately **3.5-6.0 GB** depending on whether CUDA toolkits are downloaded.
 
 ## CPU-Only Mode
 The Training Environment dock exposes a CPU-only toggle (persisted in QSettings) that forces the manager to install CPU wheels even when a CUDA-capable GPU is discovered. This is useful for laptops with unsupported driver stacks or for minimising download size (~1.5 GB).
@@ -24,7 +24,7 @@ runtime/
 ```
 
 ## Re-running the Setup
-Use the **Prepare/Repair Environment** button inside the “Training Environment” dock. The manager will:
+Use the **Prepare/Repair Environment** button inside the "Training Environment" dock. The manager will:
 1. Locate or download Python.
 2. Recreate the virtual environment.
 3. Upgrade `pip` and reinstall the packages listed above.

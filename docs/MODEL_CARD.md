@@ -1,4 +1,4 @@
-# TorchAI Model Card
+﻿# TorchAI Model Card
 
 ## Overview
 TorchAI wraps TorchScript modules so the CNC toolpath planner can predict machining strategy parameters from geometric features. When LibTorch is available the engine loads a scripted `.pt` module at startup, evaluates it on demand, and feeds the predicted strategy back into the placeholder toolpath generator. If LibTorch is absent the code compiles in a stub mode that always returns safe defaults, keeping the public ABI intact.
@@ -30,12 +30,12 @@ The scripted module may return one of the following structures:
 - Outputs:
   1. `logits` &mdash; unnormalised scores for Raster vs Waterline.
   2. `angle_deg` &mdash; scalar angle in `[0, 180]`.
-  3. `step_over_mm` &mdash; scalar step-over constrained to `≤ 0.9 * tool_diameter_mm`.
-- Training data: 2 000 synthetic samples generated with the heuristics in `train/train_strategy.py`. The dataset mirrors the C++ feature order so the exported model can be consumed without additional preprocessing.
+  3. `step_over_mm` &mdash; scalar step-over constrained to `<= 0.9 * tool_diameter_mm`.
+- Training data: 2,000 synthetic samples generated with the heuristics in `train/train_strategy.py`. The dataset mirrors the C++ feature order so the exported model can be consumed without additional preprocessing.
 - Validation snapshot (seed 1337, opset 17 export):
   * Accuracy: **0.81**
-  * Angle MAE: **8.75°**
-  * Step-over MAE: **0.48 mm**
+  * Angle MAE: **8.75 deg**
+  * Step-over MAE: **0.48 mm**
 
 ## Fixed Test Model (`models/fixed_test.pt`)
 
@@ -43,7 +43,7 @@ To exercise the C++ integration without running the full trainer, a scripted mod
 
 - Forward signature: accepts `1 x 6` or `N x 6` float tensors matching the feature order above.
 - Output tensor shape: `N x 4`, ordered as `[logit_raster, logit_waterline, angle_deg, step_over_mm]`.
-- Behaviour: always favours the Raster strategy (`logit_raster = +8`, `logit_waterline = -8`), reports a constant `45.0°` angle, and derives the step-over as `0.4 * tool_diameter` using channel index `5` from the input tensor.
+- Behaviour: always favours the Raster strategy (`logit_raster = +8`, `logit_waterline = -8`), reports a constant `45.0 deg` angle, and derives the step-over as `0.4 * tool_diameter` using channel index `5` from the input tensor.
 
 This deterministic module is useful for smoke tests because it has no learned weights and therefore loads instantly on every platform.
 
