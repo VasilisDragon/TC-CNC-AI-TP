@@ -1,0 +1,23 @@
+{
+  "tools": [
+    {
+      "id": "flat_6mm",
+      "name": "Flat Endmill 6 mm",
+      "type": "flat",
+      "diameter_mm": 6.0
+    },
+    {
+      "id": "ball_3mm",
+      "name": "Ball Endmill 3 mm",
+      "type": "ball",
+      "diameter_mm": 3.0
+    },
+    {
+      "id": "vbit_60deg",
+      "name": "V-bit 60 deg",
+      "type": "v-bit",
+      "diameter_mm": 6.0,
+      "notes": "60 degree engraving bit"
+    }
+  ]
+}

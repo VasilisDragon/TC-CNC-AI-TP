@@ -1,0 +1,11 @@
+#pragma once
+
+namespace app::buildinfo
+{
+inline constexpr const char* kVersion = "@PROJECT_VERSION@";
+inline constexpr const char* kCommit = "@GIT_COMMIT_HASH@";
+inline constexpr const char* kBackends = "@ENABLED_BACKENDS@";
+inline constexpr const char* kBuildDate = "@BUILD_TIMESTAMP@";
+inline constexpr const char* kConfigFallback = "@BUILD_CONFIG_FALLBACK@";
+} // namespace app::buildinfo
+
