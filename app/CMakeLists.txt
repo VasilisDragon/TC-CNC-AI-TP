@@ -1,10 +1,16 @@
 qt_add_executable(app
     ../src/app/MainWindow.h
     ../src/app/AiPreferencesDialog.h
+    ../src/app/TrainingNewModelDialog.h
+    ../src/app/TrainingSyntheticDataDialog.h
     include/app/ToolpathSettingsWidget.h
     ../src/app/MainWindow.cpp
     ../src/app/AiPreferencesDialog.cpp
+    ../src/app/TrainingNewModelDialog.cpp
+    ../src/app/TrainingSyntheticDataDialog.cpp
     ../src/app/AiPreferencesDialog.ui
+    ../src/app/TrainingNewModelDialog.ui
+    ../src/app/TrainingSyntheticDataDialog.ui
     src/ToolpathSettingsWidget.cpp
     src/main.cpp
 )
@@ -31,6 +37,14 @@ target_include_directories(app
         ${CMAKE_CURRENT_BINARY_DIR}/include
 )
 
+target_sources(app
+    PRIVATE
+        ../src/train/EnvManager.h
+        ../src/train/EnvManager.cpp
+        ../src/train/TrainingManager.h
+        ../src/train/TrainingManager.cpp
+)
+
 target_link_libraries(app
     PRIVATE
         Qt6::Core
@@ -47,7 +61,7 @@ target_link_libraries(app
 
 target_compile_definitions(app
     PRIVATE
-        APP_BUILD_CONFIG=\"$<CONFIG>\"
+        APP_BUILD_CONFIG="$<CONFIG>"
 )
 
 set_target_properties(app PROPERTIES
@@ -84,5 +98,4 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/samples/
     DESTINATION ${CMAKE_INSTALL_BINDIR}/samples
     FILES_MATCHING PATTERN "*.stl"
 )
-
 

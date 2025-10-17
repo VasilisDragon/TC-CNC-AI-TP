@@ -1,0 +1,65 @@
+{
+  "model_name": "strategy_v2",
+  "version": "2",
+  "timestamp": "2025-01-15T12:00:00Z",
+  "framework": {
+    "name": "PyTorch",
+    "version": "2.1.0"
+  },
+  "artifacts": {
+    "torchscript": "strategy_v2.pt",
+    "onnx": "strategy_v2.onnx",
+    "onnx_json": "strategy_v2.onnx.json"
+  },
+  "interface": {
+    "feature_version": "v2",
+    "feature_names": [
+      "bbox_x_mm",
+      "bbox_y_mm",
+      "bbox_z_mm",
+      "surface_area_mm2",
+      "volume_mm3",
+      "slope_bin_0_15",
+      "slope_bin_15_30",
+      "slope_bin_30_45",
+      "slope_bin_45_60",
+      "slope_bin_60_90",
+      "mean_curvature_rad",
+      "curvature_variance_rad2",
+      "flat_area_ratio",
+      "steep_area_ratio",
+      "pocket_depth_mm",
+      "user_step_over_mm",
+      "tool_diameter_mm"
+    ],
+    "inputs": [
+      {
+        "name": "features",
+        "shape": ["batch", 17],
+        "dtype": "float32",
+        "description": "Feature vector order: bbox_x_mm, bbox_y_mm, bbox_z_mm, surface_area_mm2, volume_mm3, slope_bin_0_15, slope_bin_15_30, slope_bin_30_45, slope_bin_45_60, slope_bin_60_90, mean_curvature_rad, curvature_variance_rad2, flat_area_ratio, steep_area_ratio, pocket_depth_mm, user_step_over_mm, tool_diameter_mm"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "shape": ["batch", 2],
+        "dtype": "float32",
+        "description": "Strategy logits ordered as [raster, waterline]."
+      },
+      {
+        "name": "angle_deg",
+        "shape": ["batch", 1],
+        "dtype": "float32",
+        "description": "Predicted raster hatch angle in degrees."
+      },
+      {
+        "name": "step_over_mm",
+        "shape": ["batch", 1],
+        "dtype": "float32",
+        "description": "Predicted step-over distance in millimetres."
+      }
+    ]
+  }
+}
+
