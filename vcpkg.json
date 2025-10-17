@@ -1,0 +1,13 @@
+{
+  "name": "cnctc",
+  "version-string": "0.1.0",
+  "dependencies": [],
+  "features": {
+    "onnxruntime": {
+      "description": "Enable ONNX Runtime inference backend.",
+      "dependencies": [
+        "onnxruntime"
+      ]
+    }
+  }
+}
