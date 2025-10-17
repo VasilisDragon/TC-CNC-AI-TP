@@ -1,5 +1,7 @@
 add_library(ai STATIC
     IPathAI.h
+    FeatureExtractor.h
+    FeatureExtractor.cpp
     TorchAI.h
     TorchAI.cpp
     OnnxAI.h

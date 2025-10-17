@@ -33,47 +33,59 @@ glm::vec3 toGlm(const QVector3D& v)
     return glm::vec3{v.x(), v.y(), v.z()};
 }
 
-std::optional<float> surfaceHeightAt(const std::vector<glm::vec3>& vertices,
-                                     const std::vector<render::Model::Index>& indices,
-                                     float x,
-                                     float y)
+struct TriangleSpan
+{
+    glm::vec3 a;
+    glm::vec3 edge0;
+    glm::vec3 edge1;
+    glm::vec3 normal;
+    float minXRot{0.0f};
+    float maxXRot{0.0f};
+    float minYRot{0.0f};
+    float maxYRot{0.0f};
+    float d00{0.0f};
+    float d01{0.0f};
+    float d11{0.0f};
+};
+
+std::optional<float> sampleHeight(const std::vector<TriangleSpan>& spans,
+                                  const std::vector<std::size_t>& candidates,
+                                  float x,
+                                  float y,
+                                  float xRot,
+                                  float eps)
 {
     float maxZ = -std::numeric_limits<float>::infinity();
     bool found = false;
 
-    const float eps = 1e-5f;
-    for (std::size_t i = 0; i + 2 < indices.size(); i += 3)
+    for (std::size_t index : candidates)
     {
-        const glm::vec3& a = vertices[indices[i]];
-        const glm::vec3& b = vertices[indices[i + 1]];
-        const glm::vec3& c = vertices[indices[i + 2]];
-
-        const glm::vec3 normal = glm::cross(b - a, c - a);
-        if (std::abs(normal.z) < eps)
+        const TriangleSpan& span = spans.at(index);
+        if (xRot < span.minXRot - eps || xRot > span.maxXRot + eps)
         {
             continue;
         }
 
-        const float z = a.z - (normal.x * (x - a.x) + normal.y * (y - a.y)) / normal.z;
+        if (std::abs(span.normal.z) < eps)
+        {
+            continue;
+        }
+
+        const float z = span.a.z - (span.normal.x * (x - span.a.x) + span.normal.y * (y - span.a.y)) / span.normal.z;
         const glm::vec3 p{x, y, z};
+        const glm::vec3 v2 = p - span.a;
 
-        const glm::vec3 v0 = b - a;
-        const glm::vec3 v1 = c - a;
-        const glm::vec3 v2 = p - a;
-
-        const float d00 = glm::dot(v0, v0);
-        const float d01 = glm::dot(v0, v1);
-        const float d11 = glm::dot(v1, v1);
-        const float d20 = glm::dot(v2, v0);
-        const float d21 = glm::dot(v2, v1);
-        const float denom = d00 * d11 - d01 * d01;
+        const float denom = span.d00 * span.d11 - span.d01 * span.d01;
         if (std::abs(denom) < eps)
         {
             continue;
         }
 
-        const float v = (d11 * d20 - d01 * d21) / denom;
-        const float w = (d00 * d21 - d01 * d20) / denom;
+        const float d20 = glm::dot(v2, span.edge0);
+        const float d21 = glm::dot(v2, span.edge1);
+
+        const float v = (span.d11 * d20 - span.d01 * d21) / denom;
+        const float w = (span.d00 * d21 - span.d01 * d20) / denom;
         const float u = 1.0f - v - w;
 
         if (u >= -eps && v >= -eps && w >= -eps && u <= 1.0f + eps && v <= 1.0f + eps && w <= 1.0f + eps)
@@ -268,6 +280,63 @@ bool OclAdapter::rasterDropCutter(const render::Model& model,
     const int rows = std::max(1, static_cast<int>(std::ceil((maxYRot - minYRot) / step)));
     const float tipOffset = cutter.type == Cutter::Type::BallNose ? static_cast<float>(cutter.diameter * 0.5) : 0.0f;
 
+    constexpr float kEps = 1e-5f;
+
+    std::vector<TriangleSpan> spans;
+    spans.reserve(indices.size() / 3);
+
+    for (std::size_t i = 0; i + 2 < indices.size(); i += 3)
+    {
+        TriangleSpan span;
+        span.a = glmVertices[indices[i]];
+        const glm::vec3 b = glmVertices[indices[i + 1]];
+        const glm::vec3 c = glmVertices[indices[i + 2]];
+        span.edge0 = b - span.a;
+        span.edge1 = c - span.a;
+        span.normal = glm::cross(span.edge0, span.edge1);
+        if (glm::length2(span.normal) < kEps)
+        {
+            continue;
+        }
+
+        const auto [axRot, ayRot] = rotate2D(span.a.x, span.a.y);
+        const auto [bxRot, byRot] = rotate2D(b.x, b.y);
+        const auto [cxRot, cyRot] = rotate2D(c.x, c.y);
+
+        span.minXRot = std::min({axRot, bxRot, cxRot});
+        span.maxXRot = std::max({axRot, bxRot, cxRot});
+        span.minYRot = std::min({ayRot, byRot, cyRot});
+        span.maxYRot = std::max({ayRot, byRot, cyRot});
+
+        span.d00 = glm::dot(span.edge0, span.edge0);
+        span.d01 = glm::dot(span.edge0, span.edge1);
+        span.d11 = glm::dot(span.edge1, span.edge1);
+
+        spans.push_back(std::move(span));
+    }
+
+    if (spans.empty())
+    {
+        err = "Raster drop-cutter produced no valid triangles.";
+        return false;
+    }
+
+    std::vector<std::vector<std::size_t>> rowBuckets(static_cast<std::size_t>(rows) + 1);
+    const float invStep = 1.0f / std::max(step, 1e-5f);
+
+    for (std::size_t idx = 0; idx < spans.size(); ++idx)
+    {
+        const TriangleSpan& span = spans[idx];
+        int startRow = static_cast<int>(std::floor((span.minYRot - minYRot) * invStep));
+        int endRow = static_cast<int>(std::ceil((span.maxYRot - minYRot) * invStep));
+        startRow = std::clamp(startRow - 1, 0, rows);
+        endRow = std::clamp(endRow + 1, 0, rows);
+        for (int row = startRow; row <= endRow; ++row)
+        {
+            rowBuckets[static_cast<std::size_t>(row)].push_back(idx);
+        }
+    }
+
     for (int row = 0; row <= rows; ++row)
     {
         const float yRot = std::min(minYRot + static_cast<float>(row) * step, maxYRot);
@@ -279,8 +348,9 @@ bool OclAdapter::rasterDropCutter(const render::Model& model,
         const auto startCutXY = unrotate2D(startXRot, yRot);
         const auto endCutXY = unrotate2D(endXRot, yRot);
 
-        const auto startHeight = surfaceHeightAt(glmVertices, indices, startCutXY.first, startCutXY.second);
-        const auto endHeight = surfaceHeightAt(glmVertices, indices, endCutXY.first, endCutXY.second);
+        const auto& candidates = rowBuckets[static_cast<std::size_t>(row)];
+        const auto startHeight = sampleHeight(spans, candidates, startCutXY.first, startCutXY.second, startXRot, kEps);
+        const auto endHeight = sampleHeight(spans, candidates, endCutXY.first, endCutXY.second, endXRot, kEps);
 
         if (!startHeight && !endHeight)
         {

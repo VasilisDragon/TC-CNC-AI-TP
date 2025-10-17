@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TrainingSyntheticDataDialog</class>
+ <widget class="QDialog" name="TrainingSyntheticDataDialog">
+  <property name="windowModality">
+   <enum>Qt::WindowModal</enum>
+  </property>
+  <property name="windowTitle">
+   <string>Generate Synthetic Data</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="introLabel">
+     <property name="text">
+      <string>Choose dataset name and sampling parameters.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="setupGroup">
+     <property name="title">
+      <string>Dataset</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelLabel">
+        <property name="text">
+         <string>Dataset label</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="labelLineEdit">
+        <property name="placeholderText">
+         <string>synthetic_v2</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="directoryLabel">
+        <property name="text">
+         <string>Output directory</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QWidget" name="directoryWidget" native="true">
+        <layout class="QHBoxLayout" name="horizontalLayout">
+         <property name="spacing">
+          <number>6</number>
+         </property>
+         <property name="contentsMargins">
+          <left>0</left>
+          <top>0</top>
+          <right>0</right>
+          <bottom>0</bottom>
+         </property>
+         <item>
+          <widget class="QLineEdit" name="directoryLineEdit">
+           <property name="placeholderText">
+            <string>datasets/synthetic_v2</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="browseDirectoryButton">
+           <property name="text">
+            <string>...</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="overwriteLabel">
+        <property name="text">
+         <string>Overwrite</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QCheckBox" name="overwriteCheckBox">
+        <property name="text">
+         <string>Replace existing dataset if it exists</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="parametersGroup">
+     <property name="title">
+      <string>Sampling Controls</string>
+     </property>
+     <layout class="QFormLayout" name="parametersLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="samplesLabel">
+        <property name="text">
+         <string>Samples</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QWidget" name="samplesWidget" native="true">
+        <layout class="QHBoxLayout" name="samplesLayout">
+         <property name="spacing">
+          <number>6</number>
+         </property>
+         <property name="contentsMargins">
+          <left>0</left>
+          <top>0</top>
+          <right>0</right>
+          <bottom>0</bottom>
+         </property>
+         <item>
+          <widget class="QSlider" name="samplesSlider">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="minimum">
+            <number>100</number>
+           </property>
+           <property name="maximum">
+            <number>5000</number>
+           </property>
+           <property name="pageStep">
+            <number>100</number>
+           </property>
+           <property name="value">
+            <number>1500</number>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QSpinBox" name="samplesSpinBox">
+           <property name="minimum">
+            <number>100</number>
+           </property>
+           <property name="maximum">
+            <number>5000</number>
+           </property>
+           <property name="singleStep">
+            <number>50</number>
+           </property>
+           <property name="value">
+            <number>1500</number>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="diversityLabel">
+        <property name="text">
+         <string>Shape diversity</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QWidget" name="diversityWidget" native="true">
+        <layout class="QHBoxLayout" name="diversityLayout">
+         <property name="spacing">
+          <number>6</number>
+         </property>
+         <property name="contentsMargins">
+          <left>0</left>
+          <top>0</top>
+          <right>0</right>
+          <bottom>0</bottom>
+         </property>
+         <item>
+          <widget class="QSlider" name="diversitySlider">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="minimum">
+            <number>0</number>
+           </property>
+           <property name="maximum">
+            <number>100</number>
+           </property>
+           <property name="pageStep">
+            <number>5</number>
+           </property>
+           <property name="value">
+            <number>60</number>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QDoubleSpinBox" name="diversitySpinBox">
+           <property name="minimum">
+            <double>0.000000</double>
+           </property>
+           <property name="maximum">
+            <double>1.000000</double>
+           </property>
+           <property name="singleStep">
+            <double>0.050000</double>
+           </property>
+           <property name="value">
+            <double>0.600000</double>
+           </property>
+           <property name="decimals">
+            <number>2</number>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="slopeLabel">
+        <property name="text">
+         <string>Slope mix</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QWidget" name="slopeWidget" native="true">
+        <layout class="QHBoxLayout" name="slopeLayout">
+         <property name="spacing">
+          <number>6</number>
+         </property>
+         <property name="contentsMargins">
+          <left>0</left>
+          <top>0</top>
+          <right>0</right>
+          <bottom>0</bottom>
+         </property>
+         <item>
+          <widget class="QSlider" name="slopeSlider">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="minimum">
+            <number>0</number>
+           </property>
+           <property name="maximum">
+            <number>100</number>
+           </property>
+           <property name="pageStep">
+            <number>5</number>
+           </property>
+           <property name="value">
+            <number>50</number>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QDoubleSpinBox" name="slopeSpinBox">
+           <property name="minimum">
+            <double>0.000000</double>
+           </property>
+           <property name="maximum">
+            <double>1.000000</double>
+           </property>
+           <property name="singleStep">
+            <double>0.050000</double>
+           </property>
+           <property name="value">
+            <double>0.500000</double>
+           </property>
+           <property name="decimals">
+            <number>2</number>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>accepted()</signal>
+   <receiver>TrainingSyntheticDataDialog</receiver>
+   <slot>accept()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>306</x>
+     <y>499</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>306</x>
+     <y>249</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>rejected()</signal>
+   <receiver>TrainingSyntheticDataDialog</receiver>
+   <slot>reject()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>182</x>
+     <y>499</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>182</x>
+     <y>249</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>

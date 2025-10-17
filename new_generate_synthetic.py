@@ -488,7 +488,7 @@ def main() -> int:
         sample_ids.append(sample_dir.name)
         print(
             f"[{idx + 1:04d}/{args.n:04d}] {sample_dir.name} -> {label['strategy']} "
-            f"(angle={label['angle_deg']:.1f} deg, step={label['step_over_mm']} mm, steep={label['steep_ratio']})"
+            f"(angle={label['angle_deg']:.1f}°, step={label['step_over_mm']} mm, steep={label['steep_ratio']})"
         )
 
     rng_split = np.random.default_rng(args.seed ^ 0x5F3759DF)
@@ -509,8 +509,3 @@ def main() -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
-
-
-
-
-

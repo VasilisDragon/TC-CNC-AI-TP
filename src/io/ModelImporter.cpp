@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -27,6 +28,9 @@ constexpr unsigned int kPostProcessFlags =
     aiProcess_PreTransformVertices |
     aiProcess_SortByPType |
     aiProcess_CalcTangentSpace;
+
+constexpr std::uintmax_t kMaxFileSizeBytes = 200 * 1024ull * 1024ull; // 200 MB
+constexpr std::size_t kMaxTriangleCount = 5'000'000; // guard against runaway imports
 
 std::string toLower(std::string value)
 {
@@ -87,6 +91,14 @@ bool ModelImporter::load(const std::filesystem::path& file,
         return false;
     }
 
+    std::error_code ec;
+    const std::uintmax_t fileSize = fs::file_size(file, ec);
+    if (!ec && fileSize > kMaxFileSizeBytes)
+    {
+        error = "File too large for import safeguard (limit 200 MB).";
+        return false;
+    }
+
     std::string extension = toLower(file.extension().string());
 
     if (isStepLikeExtension(extension))
@@ -122,6 +134,7 @@ bool ModelImporter::load(const std::filesystem::path& file,
 
     size_t estimatedVertexCount = 0;
     size_t estimatedIndexCount = 0;
+    std::size_t triangleCount = 0;
     for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
     {
         const aiMesh* mesh = scene->mMeshes[meshIndex];
@@ -129,6 +142,12 @@ bool ModelImporter::load(const std::filesystem::path& file,
         {
             estimatedVertexCount += mesh->mNumVertices;
             estimatedIndexCount += mesh->mNumFaces * 3;
+            triangleCount += mesh->mNumFaces;
+            if (triangleCount > kMaxTriangleCount)
+            {
+                error = "Mesh exceeds triangle safety limit (5M faces).";
+                return false;
+            }
         }
     }
 

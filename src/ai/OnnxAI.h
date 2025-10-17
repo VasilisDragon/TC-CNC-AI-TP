@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ai/FeatureExtractor.h"
 #include "ai/IPathAI.h"
 
 #include <filesystem>
@@ -37,9 +38,12 @@ private:
     StrategyDecision fallbackDecision(const tp::UserParams& params) const;
     void configureSession();
     bool loadMetadata();
+    std::size_t parseExpectedInputSizeFromArtifacts() const;
+    std::size_t resolveExpectedInputSize() const;
+    std::vector<float> alignFeatureVector(std::vector<float>&&) const;
+    void logFeaturePreview(const std::vector<float>& features) const;
     std::vector<float> buildFeatures(const render::Model& model,
                                      const tp::UserParams& params) const;
-    double computeSurfaceArea(const render::Model& model) const;
 
     struct OutputNames
     {
@@ -59,6 +63,9 @@ private:
     std::string m_device{"CPU"};
     std::string m_lastError;
     double m_lastLatencyMs{0.0};
+    std::size_t m_expectedInputSize{0};
+    mutable bool m_warnedFeatureSize{false};
+    mutable bool m_loggedFeaturePreview{false};
 
 #ifdef AI_WITH_ONNXRUNTIME
     std::unique_ptr<Ort::Session> m_session;

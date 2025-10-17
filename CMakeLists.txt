@@ -6,6 +6,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 include(GNUInstallDirs)
@@ -128,6 +133,7 @@ add_subdirectory(src/tp)
 add_subdirectory(app)
 
 if (AI_ONNX_ENABLED)
+    find_package(Threads REQUIRED)
     add_executable(onnx_ai_smoke
         tests/onnx_ai_smoke.cpp
     )
@@ -136,9 +142,70 @@ if (AI_ONNX_ENABLED)
             ai
             render
             Qt6::Core
+            Threads::Threads
     )
     target_compile_definitions(onnx_ai_smoke PRIVATE AI_SMOKE_TEST=1)
 endif()
+
+include(CTest)
+
+if (BUILD_TESTING)
+    add_executable(basic_sanity_tests
+        tests/basic_sanity.cpp
+    )
+    target_include_directories(basic_sanity_tests
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/tests
+    )
+    target_link_libraries(basic_sanity_tests
+        PRIVATE
+            common
+    )
+
+    add_executable(path_safety_tests
+        tests/path_safety_tests.cpp
+    )
+    target_link_libraries(path_safety_tests
+        PRIVATE
+            tp
+    )
+
+    add_executable(headless_pipeline_tests
+        tests/headless_pipeline.cpp
+    )
+    target_link_libraries(headless_pipeline_tests
+        PRIVATE
+            tp
+            io
+    )
+    string(REPLACE "\\" "\\\\" CNCTC_SOURCE_DIR_ESCAPED "${CMAKE_SOURCE_DIR}")
+    target_compile_definitions(headless_pipeline_tests
+        PRIVATE
+            CNCTC_SOURCE_DIR="${CNCTC_SOURCE_DIR_ESCAPED}"
+    )
+
+    add_test(NAME basic_sanity COMMAND basic_sanity_tests)
+    add_test(NAME path_safety COMMAND path_safety_tests)
+    add_test(NAME headless_pipeline COMMAND headless_pipeline_tests)
+
+    set_tests_properties(path_safety PROPERTIES LABELS fast)
+    set_tests_properties(headless_pipeline PROPERTIES LABELS fast)
+    set_tests_properties(basic_sanity PROPERTIES LABELS fast)
+
+    if (TARGET onnx_ai_smoke)
+        add_test(NAME onnx_ai_smoke_test COMMAND onnx_ai_smoke)
+        set_tests_properties(onnx_ai_smoke_test PROPERTIES LABELS fast)
+    endif()
+endif()
+
+if (MSVC)
+    add_compile_options(/W4 /permissive- /Zc:preprocessor /EHsc /bigobj)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+endif()
+
+add_compile_definitions(
+    $<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN;NOMINMAX;_USE_MATH_DEFINES;UNICODE;_UNICODE>
+)
 
 set(EXTRA_RUNTIME_DLLS "")
 if (TARGET assimp::assimp)

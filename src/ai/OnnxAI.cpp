@@ -5,8 +5,10 @@
 
 #include <QtCore/QDebug>
 #include <QtCore/QFile>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QStringList>
 #include <QtGui/QVector3D>
 
 #include <algorithm>
@@ -26,6 +28,63 @@ QString toQString(const std::filesystem::path& path)
 #else
     return QString::fromStdString(path.string());
 #endif
+}
+
+std::size_t readInputDimFromSchema(const std::filesystem::path& path)
+{
+    if (path.empty())
+    {
+        return 0;
+    }
+
+    const QString schemaPath = toQString(path);
+    QFile file(schemaPath);
+    if (!file.exists())
+    {
+        return 0;
+    }
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        qWarning().noquote() << "OnnxAI: unable to open schema" << schemaPath << "-" << file.errorString();
+        return 0;
+    }
+
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isObject())
+    {
+        return 0;
+    }
+    const QJsonObject root = doc.object();
+    const QJsonObject interface = root.value(QStringLiteral("interface")).toObject();
+    const QJsonArray inputs = interface.value(QStringLiteral("inputs")).toArray();
+    if (inputs.isEmpty() || !inputs.first().isObject())
+    {
+        return 0;
+    }
+    const QJsonObject firstInput = inputs.first().toObject();
+    const QJsonValue shapeValue = firstInput.value(QStringLiteral("shape"));
+    if (shapeValue.isArray())
+    {
+        const QJsonArray shapeArray = shapeValue.toArray();
+        if (shapeArray.size() >= 2)
+        {
+            const QJsonValue dimValue = shapeArray.at(1);
+            if (dimValue.isDouble())
+            {
+                return static_cast<std::size_t>(dimValue.toInt());
+            }
+            if (dimValue.isString())
+            {
+                bool ok = false;
+                const int parsed = dimValue.toString().toInt(&ok);
+                if (ok && parsed > 0)
+                {
+                    return static_cast<std::size_t>(parsed);
+                }
+            }
+        }
+    }
+    return 0;
 }
 
 #ifdef AI_WITH_ONNXRUNTIME
@@ -65,6 +124,7 @@ OnnxAI::OnnxAI(std::filesystem::path modelPath)
     m_useCuda = false;
     m_hasCuda = false;
 #endif
+    m_expectedInputSize = resolveExpectedInputSize();
 }
 
 void OnnxAI::setForceCpu(bool forceCpu)
@@ -218,6 +278,8 @@ void OnnxAI::configureSession()
 
     if (m_modelPath.empty())
     {
+        m_expectedInputSize = FeatureExtractor::featureCount() + 2;
+        m_warnedFeatureSize = false;
         return;
     }
 
@@ -227,7 +289,7 @@ void OnnxAI::configureSession()
     Ort::SessionOptions options;
     options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
-    bool cudaRequested = m_hasCuda && !m_forceCpu;
+    const bool cudaRequested = m_hasCuda && !m_forceCpu;
     if (cudaRequested)
     {
         try
@@ -271,12 +333,17 @@ void OnnxAI::configureSession()
         m_useCuda = false;
         m_device = (m_forceCpu && m_hasCuda) ? "CPU (forced)" : "CPU";
     }
+
+    m_expectedInputSize = resolveExpectedInputSize();
 #else
     m_loaded = false;
     m_useCuda = false;
     m_hasCuda = false;
     m_device = "CPU (stub)";
+    m_expectedInputSize = FeatureExtractor::featureCount() + 2;
 #endif
+    m_warnedFeatureSize = false;
+    m_loggedFeaturePreview = false;
 }
 
 bool OnnxAI::loadMetadata()
@@ -331,53 +398,129 @@ bool OnnxAI::loadMetadata()
     return true;
 }
 
+std::size_t OnnxAI::parseExpectedInputSizeFromArtifacts() const
+{
+    std::vector<std::filesystem::path> candidates;
+    if (!m_modelPath.empty())
+    {
+        candidates.emplace_back(m_modelPath.string() + ".card.json");
+
+        std::filesystem::path baseNoExt = m_modelPath;
+        baseNoExt.replace_extension();
+        candidates.emplace_back(baseNoExt.string() + ".card.json");
+        candidates.emplace_back(baseNoExt.string() + ".onnx.json");
+
+        std::filesystem::path schemaPath = m_modelPath;
+        schemaPath += ".onnx.json";
+        candidates.emplace_back(schemaPath);
+    }
+
+    if (!m_metadataPath.empty())
+    {
+        candidates.emplace_back(m_metadataPath);
+    }
+
+    for (const auto& candidate : candidates)
+    {
+        if (const auto size = readInputDimFromSchema(candidate); size > 0)
+        {
+            return size;
+        }
+    }
+
+    return 0;
+}
+
+std::size_t OnnxAI::resolveExpectedInputSize() const
+{
+    std::size_t expected = parseExpectedInputSizeFromArtifacts();
+
+#ifdef AI_WITH_ONNXRUNTIME
+    if (expected == 0 && m_session)
+    {
+        try
+        {
+            Ort::TypeInfo typeInfo = m_session->GetInputTypeInfo(0);
+            Ort::TensorTypeAndShapeInfo shapeInfo = typeInfo.GetTensorTypeAndShapeInfo();
+            std::vector<int64_t> shape = shapeInfo.GetShape();
+            if (shape.size() >= 2 && shape[1] > 0)
+            {
+                expected = static_cast<std::size_t>(shape[1]);
+            }
+        }
+        catch (const Ort::Exception& e)
+        {
+            qWarning().noquote() << "OnnxAI: unable to query input shape -" << QString::fromStdString(e.what());
+        }
+    }
+#endif
+
+    if (expected == 0)
+    {
+        expected = FeatureExtractor::featureCount() + 2;
+    }
+
+    return expected;
+}
+
+std::vector<float> OnnxAI::alignFeatureVector(std::vector<float>&& input) const
+{
+    if (m_expectedInputSize == 0 || input.size() == m_expectedInputSize)
+    {
+        return std::move(input);
+    }
+
+    if (!m_warnedFeatureSize)
+    {
+        m_warnedFeatureSize = true;
+        const QString action = input.size() < m_expectedInputSize ? QStringLiteral("padding with zeros.")
+                                                                  : QStringLiteral("truncating.");
+        qWarning().noquote() << "OnnxAI: feature vector size mismatch (expected"
+                             << static_cast<int>(m_expectedInputSize) << "received"
+                             << static_cast<int>(input.size()) << ") -" << action;
+    }
+
+    std::vector<float> adjusted = std::move(input);
+    if (adjusted.size() < m_expectedInputSize)
+    {
+        adjusted.resize(m_expectedInputSize, 0.0f);
+    }
+    else
+    {
+        adjusted.resize(m_expectedInputSize);
+    }
+    return adjusted;
+}
+
+void OnnxAI::logFeaturePreview(const std::vector<float>& features) const
+{
+    if (m_loggedFeaturePreview)
+    {
+        return;
+    }
+    m_loggedFeaturePreview = true;
+
+    QStringList previewValues;
+    const std::size_t previewCount = std::min<std::size_t>(features.size(), 6);
+    for (std::size_t i = 0; i < previewCount; ++i)
+    {
+        previewValues << QString::number(features[i], 'f', 3);
+    }
+
+    qInfo().noquote() << "OnnxAI: feature length" << static_cast<int>(features.size())
+                      << "preview [" << previewValues.join(QStringLiteral(", ")) << "]";
+}
+
 std::vector<float> OnnxAI::buildFeatures(const render::Model& model,
                                          const tp::UserParams& params) const
 {
-    std::vector<float> features;
-    features.reserve(6);
-
-    const auto bounds = model.bounds();
-    const QVector3D size = bounds.size();
-    features.push_back(size.x());
-    features.push_back(size.y());
-    features.push_back(size.z());
-
-    const double area = computeSurfaceArea(model);
-    features.push_back(static_cast<float>(area));
-
+    const auto global = FeatureExtractor::computeGlobalFeatures(model);
+    std::vector<float> features = FeatureExtractor::toVector(global);
+    features.reserve(features.size() + 2);
     features.push_back(static_cast<float>(params.stepOver));
     features.push_back(static_cast<float>(params.toolDiameter));
-
-    return features;
-}
-
-double OnnxAI::computeSurfaceArea(const render::Model& model) const
-{
-    const auto& vertices = model.vertices();
-    const auto& indices = model.indices();
-    if (vertices.empty() || indices.size() < 3)
-    {
-        return 0.0;
-    }
-
-    double area = 0.0;
-    for (size_t i = 0; i + 2 < indices.size(); i += 3)
-    {
-        const auto i0 = indices[i];
-        const auto i1 = indices[i + 1];
-        const auto i2 = indices[i + 2];
-        if (i0 >= vertices.size() || i1 >= vertices.size() || i2 >= vertices.size())
-        {
-            continue;
-        }
-
-        const QVector3D a = vertices[i0].position;
-        const QVector3D b = vertices[i1].position;
-        const QVector3D c = vertices[i2].position;
-        area += 0.5 * QVector3D::crossProduct(b - a, c - a).length();
-    }
-    return area;
+    logFeaturePreview(features);
+    return alignFeatureVector(std::move(features));
 }
 
 } // namespace ai

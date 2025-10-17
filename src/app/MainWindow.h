@@ -4,9 +4,11 @@
 #include "common/Units.h"
 #include "tp/Toolpath.h"
 #include "tp/ToolpathGenerator.h"
-#include "render/SimulationController.h"
+#include "render/SimulationController.h"\r\n#include "train/TrainingManager.h"
 
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QHash>
+#include <QtCore/QUuid>
 
 #include <memory>
 
@@ -17,6 +19,7 @@ class QAction;
 class QActionGroup;
 class QComboBox;
 class QListWidget;
+class QListWidgetItem;
 class QPlainTextEdit;
 class QDockWidget;
 class QToolBar;
@@ -25,8 +28,14 @@ class QLabel;
 class QStatusBar;
 class QGroupBox;
 class QDoubleSpinBox;
+class QCheckBox;
 class QLineEdit;
 class QVBoxLayout;
+class QProgressBar;
+class QPushButton;
+class QMenu;
+class QWidget;
+class QMenu;
 
 class AiPreferencesDialog;
 
@@ -61,6 +70,16 @@ namespace app
 {
 
 class ToolpathSettingsWidget;
+}
+
+namespace train
+{
+class EnvManager;
+class TrainingManager;
+}
+
+namespace app
+{
 
 class MainWindow : public QMainWindow
 {
@@ -73,9 +92,11 @@ public:
 private:
     void createMenus();
     void createDockWidgets();
+    void createJobsDock(QDockWidget* envDock);
     void createUnitMenu(QMenu* viewMenu);
     void createMachineMenu(QMenu* menuBar);
     void createSimulationToolbar();
+    void createTrainingMenu();
     void loadToolLibrary();
     void refreshAiModels();
     bool setActiveAiModel(const QString& path, bool quiet = false);
@@ -109,6 +130,17 @@ private:
     double lengthMmFromDisplay(double value) const;
     double feedDisplayFromMmPerMin(double valueMmPerMin) const;
     double feedMmPerMinFromDisplay(double value) const;
+    void syncPassControlsFromData();
+    void updatePassControlUnits();
+    void applyPassPreferences(tp::UserParams& params) const;
+    void appendEnvLog(const QString& text);
+    void updateEnvironmentControls(bool busy);
+    void startEnvironmentPreparation();
+    void cancelEnvironmentPreparation();
+    void onEnvProgress(int value);
+    void onEnvFinished(bool success);
+    void onEnvError(const QString& message);
+    void onGpuInfoChanged(const QString& info);
 
     void openModelFromFile();
     void saveToolpathToFile();
@@ -130,6 +162,27 @@ private:
     void updateStatusAiLabel() const;
     void onRendererInfoChanged(const QString& vendor, const QString& renderer, const QString& version);
     void onFrameStatsUpdated(float fps);
+    void ensureTrainingManager();
+    bool isGpuAvailableForTraining() const;
+    void updateTrainingActions();
+    void openTrainingNewModelDialog();
+    void openSyntheticDataDialog();
+    void fineTuneCurrentModel();
+    void openModelsFolder();
+    void openDatasetsFolder();
+    void onTrainingJobAdded(const train::TrainingManager::JobStatus& status);
+    void onTrainingJobUpdated(const train::TrainingManager::JobStatus& status);
+    void onTrainingJobRemoved(const QUuid& id);
+    void onTrainingJobLog(const QUuid& id, const QString& text);
+    void onTrainingToast(const QString& message);
+    void onTrainingModelRegistered(const QString& path);
+    void onJobSelectionChanged();
+    void updateJobLogView();
+    void requestJobCancellation(const QUuid& id);
+    QString summarizeJob(const train::TrainingManager::JobStatus& status) const;
+    QString jobStateLabel(train::TrainingManager::JobState state) const;
+    QString jobEtaLabel(qint64 etaMs) const;
+    QString jobTypeLabel(train::TrainingManager::JobType type) const;
 
     render::ModelViewerWidget* m_viewer{nullptr};
     QListWidget* m_modelBrowser{nullptr};
@@ -177,6 +230,15 @@ private:
     QDoubleSpinBox* m_machineMaxSpindle{nullptr};
     QDoubleSpinBox* m_machineClearanceZ{nullptr};
     QDoubleSpinBox* m_machineSafeZ{nullptr};
+    QGroupBox* m_passGroup{nullptr};
+    QCheckBox* m_enableRoughPassCheck{nullptr};
+    QCheckBox* m_enableFinishPassCheck{nullptr};
+    QDoubleSpinBox* m_stockAllowanceSpin{nullptr};
+    QDoubleSpinBox* m_rampAngleSpin{nullptr};
+    double m_stockAllowanceMm{0.3};
+    double m_rampAngleDeg{3.0};
+    bool m_enableRoughPassUser{true};
+    bool m_enableFinishPassUser{true};
 
     tp::ToolpathGenerator m_generator;
     common::ToolLibrary m_toolLibrary;
@@ -210,6 +272,38 @@ private:
     QString m_rendererName;
     QString m_rendererVersion;
     float m_lastFps{0.0f};
+    train::EnvManager* m_envManager{nullptr};
+    train::TrainingManager* m_trainingManager{nullptr};
+    QPlainTextEdit* m_envLog{nullptr};
+    QPushButton* m_envPrepareButton{nullptr};
+    QPushButton* m_envCancelButton{nullptr};
+    QLabel* m_envGpuLabel{nullptr};
+    QProgressBar* m_envProgress{nullptr};
+    QCheckBox* m_envCpuOnlyCheck{nullptr};
+    bool m_envReady{false};
+    QAction* m_trainingNewModelAction{nullptr};
+    QAction* m_trainingSyntheticAction{nullptr};
+    QAction* m_trainingFineTuneAction{nullptr};
+    QAction* m_trainingOpenModelsAction{nullptr};
+    QAction* m_trainingOpenDatasetsAction{nullptr};
+    QDockWidget* m_jobsDock{nullptr};
+    QListWidget* m_jobsList{nullptr};
+    QPlainTextEdit* m_jobLog{nullptr};
+    QLabel* m_jobSelectionLabel{nullptr};
+    struct JobWidgets
+    {
+        QListWidgetItem* item{nullptr};
+        QWidget* container{nullptr};
+        QLabel* title{nullptr};
+        QLabel* subtitle{nullptr};
+        QProgressBar* progress{nullptr};
+        QLabel* status{nullptr};
+        QLabel* eta{nullptr};
+        QPushButton* cancel{nullptr};
+    };
+    QHash<QUuid, JobWidgets> m_jobWidgets;
+    QHash<QUuid, QStringList> m_jobLogs;
+    QUuid m_selectedJob;
 
 protected:
     void closeEvent(QCloseEvent* event) override;

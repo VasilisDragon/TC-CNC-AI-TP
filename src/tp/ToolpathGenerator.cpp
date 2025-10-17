@@ -1,5 +1,6 @@
 ﻿#include "tp/ToolpathGenerator.h"
 
+#include "common/logging.h"
 #include "render/Model.h"
 #include "tp/heightfield/HeightField.h"
 #include "tp/heightfield/UniformGrid.h"
@@ -9,11 +10,14 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <limits>
 #include <mutex>
 #include <numbers>
+#include <numeric>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -23,8 +27,24 @@
 
 #include <algorithm>
 
+#include <QtCore/QString>
+
 namespace tp
 {
+
+struct ToolpathGenerator::PassProfile
+{
+    enum class Kind
+    {
+        Rough,
+        Finish
+    };
+
+    Kind kind{Kind::Finish};
+    double stepOver{0.0};
+    double maxStepDown{0.0};
+    double allowance{0.0};
+};
 
 namespace
 {
@@ -32,6 +52,53 @@ namespace
 constexpr double kMinClearanceOffset = 0.25;
 constexpr double kMinSafeGap = 0.5;
 constexpr double kPositionEpsilon = 1e-4;
+constexpr double kDefaultRampAngleDeg = 3.0;
+constexpr double kMinRampAngleDeg = 0.5;
+constexpr double kMaxRampAngleDeg = 45.0;
+constexpr double kMinRampHorizontalFactor = 0.25;
+constexpr double kMaxRampHorizontalFactor = 6.0;
+
+class ScopedTimer
+{
+public:
+    using Callback = std::function<void(const QString&, double, bool)>;
+
+    ScopedTimer(QString label, Callback callback, const std::atomic<bool>* cancelFlag = nullptr)
+        : m_label(std::move(label))
+        , m_callback(std::move(callback))
+        , m_cancel(cancelFlag)
+        , m_start(std::chrono::steady_clock::now())
+    {
+    }
+
+    ~ScopedTimer()
+    {
+        const auto elapsed = std::chrono::steady_clock::now() - m_start;
+        const double ms = std::chrono::duration<double, std::milli>(elapsed).count();
+        const bool cancelled = m_cancel != nullptr && m_cancel->load(std::memory_order_relaxed);
+        if (m_callback)
+        {
+            m_callback(m_label, ms, cancelled);
+        }
+        else
+        {
+            if (cancelled)
+            {
+                common::logInfo(QStringLiteral("%1 cancelled after %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
+            }
+            else
+            {
+                common::logInfo(QStringLiteral("%1 took %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
+            }
+        }
+    }
+
+private:
+    QString m_label;
+    Callback m_callback;
+    const std::atomic<bool>* m_cancel{nullptr};
+    std::chrono::steady_clock::time_point m_start;
+};
 
 float clampStepOver(double stepOverMm)
 {
@@ -87,7 +154,92 @@ void appendPolyline(std::vector<Polyline>& passes,
     }
 }
 
-void applyMachineMotion(Toolpath& toolpath, const Machine& machine, const Stock& stock)
+glm::dvec2 selectDirection2D(const std::vector<glm::dvec3>& points, bool forward)
+{
+    if (points.size() < 2)
+    {
+        return {1.0, 0.0};
+    }
+
+    if (forward)
+    {
+        const glm::dvec3& origin = points.front();
+        for (std::size_t i = 1; i < points.size(); ++i)
+        {
+            glm::dvec3 delta = points[i] - origin;
+            delta.z = 0.0;
+            const double len = glm::length(delta);
+            if (len > kPositionEpsilon)
+            {
+                return {delta.x / len, delta.y / len};
+            }
+        }
+    }
+    else
+    {
+        const glm::dvec3& origin = points.back();
+        for (std::size_t i = points.size() - 1; i > 0; --i)
+        {
+            glm::dvec3 delta = origin - points[i - 1];
+            delta.z = 0.0;
+            const double len = glm::length(delta);
+            if (len > kPositionEpsilon)
+            {
+                return {delta.x / len, delta.y / len};
+            }
+        }
+    }
+
+    return {1.0, 0.0};
+}
+
+glm::dvec3 offsetPoint(const glm::dvec3& origin,
+                       const glm::dvec2& dir,
+                       double distance,
+                       double targetZ,
+                       bool invertDirection)
+{
+    const double scale = invertDirection ? -distance : distance;
+    return {origin.x + dir.x * scale,
+            origin.y + dir.y * scale,
+            targetZ};
+}
+
+double computeRampDistance(double verticalDrop,
+                           double rampAngleRad,
+                           double minHorizontal,
+                           double maxHorizontal)
+{
+    if (verticalDrop <= kPositionEpsilon)
+    {
+        return 0.0;
+    }
+
+    const double safeAngle = std::clamp(rampAngleRad,
+                                        kMinRampAngleDeg * std::numbers::pi / 180.0,
+                                        kMaxRampAngleDeg * std::numbers::pi / 180.0);
+    const double tanValue = std::tan(std::max(safeAngle, 1e-3));
+    double horizontal = (tanValue > 1e-6) ? (verticalDrop / tanValue) : maxHorizontal;
+    if (!std::isfinite(horizontal))
+    {
+        horizontal = maxHorizontal;
+    }
+    horizontal = std::clamp(horizontal, minHorizontal, maxHorizontal);
+    return horizontal;
+}
+
+double horizontalDistance(const glm::dvec3& a, const glm::dvec3& b)
+{
+    const double dx = a.x - b.x;
+    const double dy = a.y - b.y;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+void applyMachineMotion(Toolpath& toolpath,
+                        const Machine& machine,
+                        const Stock& stock,
+                        double rampAngleDeg,
+                        double toolDiameter)
 {
     if (toolpath.passes.empty())
     {
@@ -103,11 +255,16 @@ void applyMachineMotion(Toolpath& toolpath, const Machine& machine, const Stock&
         safeZ = clearanceZ + kMinSafeGap;
     }
 
+    const double requestedRamp = std::isfinite(rampAngleDeg) ? rampAngleDeg : kDefaultRampAngleDeg;
+    const double rampAngleRad = std::clamp(requestedRamp, kMinRampAngleDeg, kMaxRampAngleDeg) * std::numbers::pi / 180.0;
+    const double safeToolDiameter = std::max(toolDiameter, 0.1);
+    const double minHorizontal = std::max(kMinRampHorizontalFactor * safeToolDiameter, 0.25);
+    const double maxHorizontal = std::max(kMaxRampHorizontalFactor * safeToolDiameter, minHorizontal * 2.0);
+
     std::vector<Polyline> result;
-    result.reserve(toolpath.passes.size() * 4);
+    result.reserve(toolpath.passes.size() * 5);
 
     glm::dvec3 lastSafe{};
-    glm::dvec3 lastClear{};
     bool haveLast = false;
 
     for (const Polyline& poly : toolpath.passes)
@@ -127,22 +284,49 @@ void applyMachineMotion(Toolpath& toolpath, const Machine& machine, const Stock&
         const glm::dvec3& startCut = cutPoints.front();
         const glm::dvec3& endCut = cutPoints.back();
 
-        glm::dvec3 startClear{startCut.x, startCut.y, clearanceZ};
-        glm::dvec3 endClear{endCut.x, endCut.y, clearanceZ};
-        glm::dvec3 startSafe{startCut.x, startCut.y, safeZ};
-        glm::dvec3 endSafe{endCut.x, endCut.y, safeZ};
+        const double entryDrop = std::max(0.0, clearanceZ - startCut.z);
+        const double exitDrop = std::max(0.0, clearanceZ - endCut.z);
+        const bool needRampIn = entryDrop > kPositionEpsilon;
+        const bool needRampOut = exitDrop > kPositionEpsilon;
+
+        const glm::dvec2 entryDir = selectDirection2D(cutPoints, true);
+        const glm::dvec2 exitDir = selectDirection2D(cutPoints, false);
+
+        const double entryHorizontal = needRampIn
+                                           ? computeRampDistance(entryDrop, rampAngleRad, minHorizontal, maxHorizontal)
+                                           : 0.0;
+        const double exitHorizontal = needRampOut
+                                          ? computeRampDistance(exitDrop, rampAngleRad, minHorizontal, maxHorizontal)
+                                          : 0.0;
+
+        glm::dvec3 entryClear = needRampIn
+                                    ? offsetPoint(startCut, entryDir, entryHorizontal, clearanceZ, true)
+                                    : glm::dvec3{startCut.x, startCut.y, clearanceZ};
+        glm::dvec3 exitClear = needRampOut
+                                   ? offsetPoint(endCut, exitDir, exitHorizontal, clearanceZ, false)
+                                   : glm::dvec3{endCut.x, endCut.y, clearanceZ};
+
+        glm::dvec3 entrySafe{entryClear.x, entryClear.y, safeZ};
+        glm::dvec3 exitSafe{exitClear.x, exitClear.y, safeZ};
 
         if (!haveLast)
         {
-            appendPolyline(result, MotionType::Link, {startSafe, startClear});
+            appendPolyline(result, MotionType::Rapid, {entrySafe, entryClear});
         }
         else
         {
-            appendPolyline(result, MotionType::Link, {lastSafe, lastClear});
-            appendPolyline(result, MotionType::Link, {lastClear, startClear});
+            appendPolyline(result, MotionType::Rapid, {lastSafe, entrySafe});
+            appendPolyline(result, MotionType::Rapid, {entrySafe, entryClear});
         }
 
-        appendPolyline(result, MotionType::Link, {startClear, startCut});
+        if (!nearlyEqual(entryClear, startCut))
+        {
+            Polyline rampIn;
+            rampIn.motion = MotionType::Cut;
+            rampIn.pts.push_back({toVec3(entryClear)});
+            rampIn.pts.push_back({toVec3(startCut)});
+            result.push_back(std::move(rampIn));
+        }
 
         Polyline cutPoly;
         cutPoly.motion = MotionType::Cut;
@@ -153,15 +337,237 @@ void applyMachineMotion(Toolpath& toolpath, const Machine& machine, const Stock&
         }
         result.push_back(std::move(cutPoly));
 
-        appendPolyline(result, MotionType::Link, {endCut, endClear});
-        appendPolyline(result, MotionType::Rapid, {endClear, endSafe});
+        if (!nearlyEqual(endCut, exitClear))
+        {
+            Polyline rampOut;
+            rampOut.motion = MotionType::Cut;
+            rampOut.pts.push_back({toVec3(endCut)});
+            rampOut.pts.push_back({toVec3(exitClear)});
+            result.push_back(std::move(rampOut));
+        }
 
-        lastClear = endClear;
-        lastSafe = endSafe;
+        appendPolyline(result, MotionType::Rapid, {exitClear, exitSafe});
+
+        lastSafe = exitSafe;
         haveLast = true;
     }
 
     toolpath.passes = std::move(result);
+}
+
+const char* passLabel(const ToolpathGenerator::PassProfile& profile)
+{
+    return (profile.kind == ToolpathGenerator::PassProfile::Kind::Rough) ? "Roughing" : "Finishing";
+}
+
+std::string makePassLog(const ToolpathGenerator::PassProfile& profile, const std::string& message)
+{
+    if (message.empty())
+    {
+        return {};
+    }
+
+    std::ostringstream oss;
+    oss << passLabel(profile) << ": " << message;
+    return oss.str();
+}
+
+glm::dvec3 reorderPassRange(std::vector<Polyline>& polylines,
+                            std::size_t begin,
+                            std::size_t end,
+                            const glm::dvec3* seedPosition)
+{
+    if (begin >= end)
+    {
+        return seedPosition ? *seedPosition : glm::dvec3{};
+    }
+
+    const std::size_t count = end - begin;
+    if (count == 0)
+    {
+        return seedPosition ? *seedPosition : glm::dvec3{};
+    }
+
+    if (count == 1)
+    {
+        const Polyline& poly = polylines[begin];
+        if (poly.pts.empty())
+        {
+            return seedPosition ? *seedPosition : glm::dvec3{};
+        }
+        return toDVec3(poly.pts.back().p);
+    }
+
+    std::vector<std::size_t> order;
+    order.reserve(count);
+    std::vector<bool> used(count, false);
+
+    auto startPoint = [&](std::size_t rel) -> glm::dvec3 {
+        const Polyline& poly = polylines[begin + rel];
+        return poly.pts.empty() ? glm::dvec3{} : toDVec3(poly.pts.front().p);
+    };
+    auto endPoint = [&](std::size_t rel) -> glm::dvec3 {
+        const Polyline& poly = polylines[begin + rel];
+        return poly.pts.empty() ? glm::dvec3{} : toDVec3(poly.pts.back().p);
+    };
+
+    auto chooseClosest = [&](const glm::dvec3& from) -> std::size_t {
+        double bestDist = std::numeric_limits<double>::max();
+        std::size_t bestIndex = count;
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            if (used[i])
+            {
+                continue;
+            }
+
+            const double dist = horizontalDistance(from, startPoint(i));
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    };
+
+    std::size_t current = 0;
+    if (seedPosition)
+    {
+        const std::size_t candidate = chooseClosest(*seedPosition);
+        if (candidate < count)
+        {
+            current = candidate;
+        }
+    }
+    else
+    {
+        double bestMetric = std::numeric_limits<double>::max();
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            const glm::dvec3 start = startPoint(i);
+            const double metric = std::abs(start.x) + std::abs(start.y);
+            if (metric < bestMetric)
+            {
+                bestMetric = metric;
+                current = i;
+            }
+        }
+    }
+
+    used[current] = true;
+    order.push_back(current);
+    glm::dvec3 cursor = endPoint(current);
+
+    while (order.size() < count)
+    {
+        std::size_t next = chooseClosest(cursor);
+        if (next >= count)
+        {
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                if (!used[i])
+                {
+                    next = i;
+                    break;
+                }
+            }
+        }
+        used[next] = true;
+        order.push_back(next);
+        cursor = endPoint(next);
+    }
+
+    std::vector<Polyline> reordered;
+    reordered.reserve(count);
+    for (std::size_t index : order)
+    {
+        reordered.push_back(std::move(polylines[begin + index]));
+    }
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        polylines[begin + i] = std::move(reordered[i]);
+    }
+
+    return cursor;
+}
+
+std::vector<ToolpathGenerator::PassProfile> buildPassPlan(const UserParams& params,
+                                                          const ai::StrategyDecision& decision)
+{
+    const double safeToolDiameter = std::max(params.toolDiameter, 0.1);
+    const double aiStep = (decision.stepOverMM > 0.0) ? decision.stepOverMM : 0.0;
+    double baseStep = aiStep > 0.0 ? aiStep : params.stepOver;
+    if (baseStep <= 0.0)
+    {
+        baseStep = safeToolDiameter * 0.4;
+    }
+
+    double finishStep = std::clamp(baseStep, 0.1, safeToolDiameter * 0.45);
+    double roughStep = std::max({params.stepOver, finishStep, safeToolDiameter * 0.65});
+    roughStep = std::clamp(roughStep, finishStep + 0.05, safeToolDiameter);
+
+    if (roughStep - finishStep < 0.05)
+    {
+        roughStep = std::min(safeToolDiameter, finishStep * 1.5);
+    }
+
+    const double baseStepDown = std::max(params.maxDepthPerPass, 0.1);
+    const double finishStepDown = std::max(0.1, baseStepDown * 0.5);
+
+    const double allowance = std::clamp(params.stockAllowance_mm, 0.0, safeToolDiameter);
+    const bool wantRough = decision.roughPass && params.enableRoughPass && allowance > 1e-4;
+    const bool wantFinish = decision.finishPass && params.enableFinishPass;
+
+    std::vector<ToolpathGenerator::PassProfile> plan;
+    plan.reserve(2);
+
+    if (wantRough)
+    {
+        ToolpathGenerator::PassProfile rough;
+        rough.kind = ToolpathGenerator::PassProfile::Kind::Rough;
+        rough.stepOver = roughStep;
+        rough.maxStepDown = baseStepDown;
+        rough.allowance = allowance;
+        plan.push_back(rough);
+    }
+
+    if (wantFinish || plan.empty())
+    {
+        ToolpathGenerator::PassProfile finish;
+        finish.kind = ToolpathGenerator::PassProfile::Kind::Finish;
+        finish.stepOver = plan.empty() ? finishStep : std::min(finishStep, roughStep * 0.75);
+        finish.stepOver = std::max(0.1, std::min(finish.stepOver, safeToolDiameter));
+        finish.maxStepDown = plan.empty() ? baseStepDown : finishStepDown;
+        finish.allowance = 0.0;
+        plan.push_back(finish);
+    }
+
+    return plan;
+}
+
+std::function<void(int)> makePassProgressCallback(const std::function<void(int)>& callback,
+                                                  std::size_t passIndex,
+                                                  std::size_t passCount)
+{
+    if (!callback || passCount == 0)
+    {
+        return {};
+    }
+
+    const double start = (static_cast<double>(passIndex) / static_cast<double>(passCount)) * 100.0;
+    const double span = 100.0 / static_cast<double>(passCount);
+
+    return [callback, start, span](int localPercent) {
+        const int clamped = std::clamp(localPercent, 0, 100);
+        const double normalized = static_cast<double>(clamped) / 100.0;
+        double value = start + span * normalized;
+        if (value >= 100.0)
+        {
+            value = 99.0;
+        }
+        callback(static_cast<int>(value));
+    };
 }
 
 double cutterOffsetFor(const UserParams& params)
@@ -341,7 +747,7 @@ void finalizeToolpath(Toolpath& toolpath, const UserParams& params)
     toolpath.machine = machine;
     toolpath.stock = stock;
 
-    applyMachineMotion(toolpath, machine, stock);
+    applyMachineMotion(toolpath, machine, stock, params.rampAngleDeg, params.toolDiameter);
 }
 
 } // namespace
@@ -378,114 +784,182 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
         *outDecision = decision;
     }
 
-    Toolpath generated;
+    auto passPlan = buildPassPlan(params, decision);
+    if (passPlan.empty())
+    {
+        finalizeToolpath(toolpath, params);
+        if (progressCallback)
+        {
+            progressCallback(100);
+        }
+        if (bannerMessage)
+        {
+            bannerMessage->clear();
+        }
+        return toolpath;
+    }
+
+    Toolpath aggregated;
     std::string bannerText;
+    std::vector<std::pair<std::size_t, std::size_t>> passRanges;
+    passRanges.reserve(passPlan.size());
 
 #if TP_WITH_OCL
     bool usedOcl = false;
-    std::string oclError;
-    Toolpath oclToolpath;
-    Cutter cutter;
-    cutter.length = std::max(3.0 * params.toolDiameter, params.toolDiameter + 5.0);
-    cutter.diameter = params.toolDiameter;
-    cutter.type = (decision.strat == ai::StrategyDecision::Strategy::Waterline)
-                      ? Cutter::Type::BallNose
-                      : Cutter::Type::FlatEndmill;
+    if (passPlan.size() == 1 && passPlan.front().allowance <= 1e-6)
+    {
+        const auto& profile = passPlan.front();
+        std::string oclError;
+        Toolpath oclToolpath;
+        Cutter cutter;
+        cutter.length = std::max(3.0 * params.toolDiameter, params.toolDiameter + 5.0);
+        cutter.diameter = params.toolDiameter;
+        cutter.type = (decision.strat == ai::StrategyDecision::Strategy::Waterline)
+                          ? Cutter::Type::BallNose
+                          : Cutter::Type::FlatEndmill;
 
-    UserParams oclParams = params;
-    if (decision.stepOverMM > 0.0)
-    {
-        oclParams.stepOver = decision.stepOverMM;
-    }
+        UserParams oclParams = params;
+        oclParams.stepOver = profile.stepOver;
 
-    const auto oclStart = std::chrono::steady_clock::now();
-    if (decision.strat == ai::StrategyDecision::Strategy::Waterline)
-    {
-        if (OclAdapter::waterline(model, oclParams, cutter, oclToolpath, oclError))
-        {
-            usedOcl = true;
-        }
-    }
-    else if (decision.strat == ai::StrategyDecision::Strategy::Raster)
-    {
-        if (OclAdapter::rasterDropCutter(model, oclParams, cutter, decision.rasterAngleDeg, oclToolpath, oclError))
-        {
-            usedOcl = true;
-        }
-    }
-
-    if (usedOcl && !oclToolpath.empty())
-    {
-        generated = std::move(oclToolpath);
-        generated.feed = params.feed;
-        generated.spindle = params.spindle;
+        const auto oclStart = std::chrono::steady_clock::now();
         if (decision.strat == ai::StrategyDecision::Strategy::Waterline)
         {
-            if (!oclError.empty())
+            if (OclAdapter::waterline(model, oclParams, cutter, oclToolpath, oclError))
             {
-                if (!bannerText.empty())
-                {
-                    bannerText += " | ";
-                }
-                bannerText += oclError;
+                usedOcl = true;
             }
         }
-        else
+        else if (decision.strat == ai::StrategyDecision::Strategy::Raster)
         {
+            if (OclAdapter::rasterDropCutter(model,
+                                             oclParams,
+                                             cutter,
+                                             decision.rasterAngleDeg,
+                                             oclToolpath,
+                                             oclError))
+            {
+                usedOcl = true;
+            }
+        }
+
+        if (usedOcl && !oclToolpath.empty())
+        {
+            aggregated = std::move(oclToolpath);
             const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - oclStart)
                                      .count();
             std::ostringstream oss;
+            oss.setf(std::ios::fixed);
             oss.precision(2);
-            oss << std::fixed << "OCL drop-cutter path generated in " << elapsed << " ms";
+            oss << passLabel(profile) << ": OCL path generated in " << elapsed << " ms";
             bannerText = oss.str();
+            passRanges.emplace_back(0, aggregated.passes.size());
         }
-    }
-    else if (!oclError.empty())
-    {
-        if (!bannerText.empty())
+        else if (!oclError.empty())
         {
-            bannerText += " | ";
+            bannerText = "OCL error: " + oclError;
         }
-        bannerText += "OCL error: " + oclError;
     }
 #endif
 
-    if (generated.empty())
+    if (cancelFlag.load(std::memory_order_relaxed))
     {
-        if (decision.strat == ai::StrategyDecision::Strategy::Waterline)
+        return Toolpath{};
+    }
+
+    if (aggregated.empty())
+    {
+        for (std::size_t passIndex = 0; passIndex < passPlan.size(); ++passIndex)
         {
-            std::string slicerLog;
-            generated = generateWaterlineSlicer(model, params, decision, cancelFlag, progressCallback, &slicerLog);
-            if (!slicerLog.empty())
+            if (cancelFlag.load(std::memory_order_relaxed))
+            {
+                return Toolpath{};
+            }
+
+            const auto& profile = passPlan[passIndex];
+            auto subProgress = makePassProgressCallback(progressCallback, passIndex, passPlan.size());
+            std::string passLog;
+            Toolpath passToolpath;
+
+            if (decision.strat == ai::StrategyDecision::Strategy::Waterline)
+            {
+                passToolpath = generateWaterlineSlicer(model,
+                                                       params,
+                                                       decision,
+                                                       profile,
+                                                       cancelFlag,
+                                                       subProgress,
+                                                       &passLog);
+            }
+            else if (params.useHeightField)
+            {
+                passToolpath = generateRasterTopography(model,
+                                                        params,
+                                                        decision,
+                                                        profile,
+                                                        cancelFlag,
+                                                        subProgress,
+                                                        &passLog);
+            }
+
+            if (passToolpath.empty())
+            {
+                passToolpath = generateFallbackRaster(model,
+                                                      params,
+                                                      decision,
+                                                      profile,
+                                                      cancelFlag,
+                                                      subProgress);
+            }
+
+            if (cancelFlag.load(std::memory_order_relaxed))
+            {
+                return Toolpath{};
+            }
+
+            if (!passLog.empty())
             {
                 if (!bannerText.empty())
                 {
                     bannerText += " | ";
                 }
-                bannerText += slicerLog;
+                bannerText += passLog;
             }
-        }
-        else if (params.useHeightField)
-        {
-            std::string hfLog;
-            generated = generateRasterTopography(model, params, decision, cancelFlag, progressCallback, &hfLog);
-            if (!hfLog.empty())
+
+            if (!passToolpath.passes.empty())
             {
-                if (!bannerText.empty())
-                {
-                    bannerText += " | ";
-                }
-                bannerText += hfLog;
+                const std::size_t offset = aggregated.passes.size();
+                aggregated.passes.insert(aggregated.passes.end(),
+                                         std::make_move_iterator(passToolpath.passes.begin()),
+                                         std::make_move_iterator(passToolpath.passes.end()));
+                passRanges.emplace_back(offset, aggregated.passes.size());
             }
         }
     }
 
-    if (generated.empty())
+    if (aggregated.passes.empty())
     {
-        generated = generateFallbackRaster(model, params, decision, cancelFlag, progressCallback);
+        finalizeToolpath(aggregated, params);
+        if (progressCallback)
+        {
+            progressCallback(100);
+        }
+        if (bannerMessage && !bannerText.empty())
+        {
+            *bannerMessage = std::move(bannerText);
+        }
+        return aggregated;
     }
 
-    finalizeToolpath(generated, params);
+    glm::dvec3 seed{};
+    bool haveSeed = false;
+    for (const auto& range : passRanges)
+    {
+        const glm::dvec3* seedPtr = haveSeed ? &seed : nullptr;
+        seed = reorderPassRange(aggregated.passes, range.first, range.second, seedPtr);
+        haveSeed = true;
+    }
+
+    finalizeToolpath(aggregated, params);
 
     if (progressCallback)
     {
@@ -497,12 +971,13 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
         *bannerMessage = std::move(bannerText);
     }
 
-    return generated;
+    return aggregated;
 }
 
 Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
                                                      const UserParams& params,
                                                      const ai::StrategyDecision& decision,
+                                                     const PassProfile& profile,
                                                      const std::atomic<bool>& cancelFlag,
                                                      const std::function<void(int)>& progressCallback,
                                                      std::string* logMessage) const
@@ -522,16 +997,48 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
         return toolpath;
     }
 
-    const double stepOver = (decision.stepOverMM > 0.0) ? decision.stepOverMM : params.stepOver;
-    const double rowSpacing = std::max(0.1, stepOver);
-    const double resolution = computeHeightFieldResolution(stepOver);
+    const double rowSpacing = std::max(0.1, profile.stepOver);
+    const double resolution = computeHeightFieldResolution(profile.stepOver);
 
     bool reused = false;
+    bool completed = false;
+    const QString timerLabel = QStringLiteral("Raster pass (row=%1 mm, res=%2 mm)")
+                                   .arg(rowSpacing, 0, 'f', 3)
+                                   .arg(resolution, 0, 'f', 3);
+
+    ScopedTimer timer(timerLabel,
+                      [&](const QString& label, double ms, bool cancelled) {
+                          const std::size_t polyCount = toolpath.passes.size();
+                          if (cancelled)
+                          {
+                              common::logInfo(QStringLiteral("%1 cancelled after %2 ms (polylines=%3)")
+                                                  .arg(label)
+                                                  .arg(ms, 0, 'f', 2)
+                                                  .arg(static_cast<qulonglong>(polyCount)));
+                              return;
+                          }
+                          if (!completed)
+                          {
+                              common::logInfo(QStringLiteral("%1 aborted after %2 ms (polylines=%3, heightfield=%4)")
+                                                  .arg(label)
+                                                  .arg(ms, 0, 'f', 2)
+                                                  .arg(static_cast<qulonglong>(polyCount))
+                                                  .arg(reused ? QStringLiteral("reused") : QStringLiteral("rebuilt")));
+                              return;
+                          }
+                          common::logInfo(QStringLiteral("%1 finished in %2 ms (polylines=%3, heightfield=%4)")
+                                              .arg(label)
+                                              .arg(ms, 0, 'f', 2)
+                                              .arg(static_cast<qulonglong>(polyCount))
+                                              .arg(reused ? QStringLiteral("reused") : QStringLiteral("rebuilt")));
+                      },
+                      &cancelFlag);
+
     std::string cacheLog;
     auto heightField = HeightFieldCache::instance().acquire(model, resolution, cancelFlag, cacheLog, reused);
     if (logMessage)
     {
-        *logMessage = cacheLog;
+        *logMessage = makePassLog(profile, cacheLog);
     }
     if (!heightField || !heightField->isValid())
     {
@@ -540,7 +1047,7 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
 
     const double cutterOffset = cutterOffsetFor(params);
     const double topZ = params.stock.topZ_mm;
-    const double maxDepthPerPass = std::max(params.maxDepthPerPass, 0.1);
+    const double maxDepthPerPass = std::max(profile.maxStepDown, 0.1);
 
     const double angleDeg = selectRasterAngleDeg(params, decision, true);
     const double angleRad = angleDeg * std::numbers::pi / 180.0;
@@ -675,7 +1182,7 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
             double sampleZ = 0.0;
             if (heightField->interpolate(sampleX, sampleY, sampleZ))
             {
-                double targetZ = sampleZ + cutterOffset;
+                double targetZ = sampleZ + cutterOffset + profile.allowance;
                 targetZ = std::min(targetZ, topZ);
                 segmentPoints.push_back({sampleX, sampleY, targetZ});
             }
@@ -699,12 +1206,14 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
         progressCallback(100);
     }
 
+    completed = true;
     return toolpath;
 }
 
 Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
                                                     const UserParams& params,
                                                     const ai::StrategyDecision& decision,
+                                                    const PassProfile& profile,
                                                     const std::atomic<bool>& cancelFlag,
                                                     const std::function<void(int)>& progressCallback,
                                                     std::string* logMessage) const
@@ -728,7 +1237,9 @@ Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
         return toolpath;
     }
 
-    const double stepDown = std::max(params.maxDepthPerPass, 0.1);
+    const double stepDown = std::max(profile.maxStepDown, 0.1);
+    const double allowance = profile.allowance;
+    const double topZ = params.stock.topZ_mm;
     const double toolRadius = (params.cutterType == UserParams::CutterType::FlatEndmill)
                                   ? params.toolDiameter * 0.5
                                   : 0.0;
@@ -737,75 +1248,110 @@ Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
 
     std::size_t loopCount = 0;
     int levelCount = 0;
+    double elapsedMs = 0.0;
+    bool completed = false;
 
-    const auto startTime = std::chrono::steady_clock::now();
+    const QString timerLabel = QStringLiteral("Waterline pass (step=%1 mm, allowance=%2 mm)")
+                                   .arg(stepDown, 0, 'f', 3)
+                                   .arg(allowance, 0, 'f', 3);
 
-    const double totalSpan = maxZ - minZ;
-    const int totalLevels = std::max(1, static_cast<int>(std::ceil(totalSpan / stepDown))) + 1;
-
-    int processedLevels = 0;
-    const bool applyOffset = (params.cutterType == UserParams::CutterType::FlatEndmill);
-
-    for (double planeZ = maxZ; planeZ >= minZ - 1e-6; planeZ -= stepDown)
     {
-        if (cancelFlag.load(std::memory_order_relaxed))
-        {
-            return Toolpath{};
-        }
+        ScopedTimer timer(timerLabel,
+                          [&](const QString& label, double ms, bool cancelled) {
+                              elapsedMs = ms;
+                              if (cancelled)
+                              {
+                                  common::logInfo(QStringLiteral("%1 cancelled after %2 ms (loops=%3)")
+                                                      .arg(label)
+                                                      .arg(ms, 0, 'f', 2)
+                                                      .arg(static_cast<qulonglong>(loopCount)));
+                                  return;
+                              }
+                              if (!completed)
+                              {
+                                  common::logInfo(QStringLiteral("%1 aborted after %2 ms (loops=%3, levels=%4)")
+                                                      .arg(label)
+                                                      .arg(ms, 0, 'f', 2)
+                                                      .arg(static_cast<qulonglong>(loopCount))
+                                                      .arg(levelCount));
+                                  return;
+                              }
+                              common::logInfo(QStringLiteral("%1 finished in %2 ms (loops=%3, levels=%4)")
+                                                  .arg(label)
+                                                  .arg(ms, 0, 'f', 2)
+                                                  .arg(static_cast<qulonglong>(loopCount))
+                                                  .arg(levelCount));
+                          },
+                          &cancelFlag);
 
-        const auto loops = slicer.slice(planeZ, toolRadius, applyOffset);
-        if (!loops.empty())
+        const double totalSpan = maxZ - minZ;
+        const int totalLevels = std::max(1, static_cast<int>(std::ceil(totalSpan / stepDown))) + 1;
+
+        int processedLevels = 0;
+        const bool applyOffset = (params.cutterType == UserParams::CutterType::FlatEndmill);
+
+        for (double planeZ = maxZ; planeZ >= minZ - 1e-6; planeZ -= stepDown)
         {
-            ++levelCount;
-            for (const auto& loop : loops)
+            if (cancelFlag.load(std::memory_order_relaxed))
             {
-                if (loop.size() < 3)
-                {
-                    continue;
-                }
+                return Toolpath{};
+            }
 
-                Polyline poly;
-                poly.motion = MotionType::Cut;
-                poly.pts.reserve(loop.size());
-                for (const auto& pt : loop)
+            const auto loops = slicer.slice(planeZ, toolRadius, applyOffset);
+            if (!loops.empty())
+            {
+                ++levelCount;
+                for (const auto& loop : loops)
                 {
-                    poly.pts.push_back({glm::vec3(static_cast<float>(pt.x),
-                                                  static_cast<float>(pt.y),
-                                                  static_cast<float>(pt.z))});
+                    if (loop.size() < 3)
+                    {
+                        continue;
+                    }
+
+                    Polyline poly;
+                    poly.motion = MotionType::Cut;
+                    poly.pts.reserve(loop.size());
+                    for (const auto& pt : loop)
+                    {
+                        const double targetZ = std::min(static_cast<double>(pt.z) + allowance, topZ);
+                        poly.pts.push_back({glm::vec3(static_cast<float>(pt.x),
+                                                       static_cast<float>(pt.y),
+                                                       static_cast<float>(targetZ))});
+                    }
+                    toolpath.passes.push_back(std::move(poly));
+                    ++loopCount;
                 }
-                toolpath.passes.push_back(std::move(poly));
-                ++loopCount;
+            }
+
+            ++processedLevels;
+            if (progressCallback)
+            {
+                const int percent = std::clamp(static_cast<int>((processedLevels * 100.0) / totalLevels), 0, 99);
+                progressCallback(percent);
             }
         }
 
-        ++processedLevels;
         if (progressCallback)
         {
-            const int percent = std::clamp(static_cast<int>((processedLevels * 100.0) / totalLevels), 0, 99);
-            progressCallback(percent);
+            progressCallback(100);
         }
-    }
 
-    if (progressCallback)
-    {
-        progressCallback(100);
-    }
+        if (toolpath.passes.empty())
+        {
+            return toolpath;
+        }
 
-    if (toolpath.passes.empty())
-    {
-        return toolpath;
+        completed = true;
     }
 
     if (logMessage)
     {
-        const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - startTime)
-                                 .count();
         std::ostringstream oss;
         oss.setf(std::ios::fixed);
         oss.precision(2);
         oss << "Waterline slicer generated " << loopCount << " loops across " << levelCount
-            << " levels in " << elapsed << " ms";
-        *logMessage = oss.str();
+            << " levels in " << elapsedMs << " ms";
+        *logMessage = makePassLog(profile, oss.str());
     }
 
     return toolpath;
@@ -814,6 +1360,7 @@ Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
 Toolpath ToolpathGenerator::generateFallbackRaster(const render::Model& model,
                                                    const UserParams& params,
                                                    const ai::StrategyDecision& decision,
+                                                   const PassProfile& profile,
                                                    const std::atomic<bool>& cancelFlag,
                                                    const std::function<void(int)>& progressCallback) const
 {
@@ -833,9 +1380,10 @@ Toolpath ToolpathGenerator::generateFallbackRaster(const render::Model& model,
         return toolpath;
     }
 
-    const float cutPlane = minZ + 0.5f;
-    const double rawStep = (decision.stepOverMM > 0.0) ? decision.stepOverMM : params.stepOver;
-    const float step = clampStepOver(rawStep);
+    const double allowance = profile.allowance;
+    const double topZ = params.stock.topZ_mm;
+    const float cutPlane = static_cast<float>(std::min(static_cast<double>(minZ) + allowance, topZ));
+    const float step = clampStepOver(profile.stepOver);
 
     const double angleDeg = selectRasterAngleDeg(params, decision, false);
     const double angleRad = angleDeg * std::numbers::pi / 180.0;

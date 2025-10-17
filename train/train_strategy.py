@@ -35,8 +35,64 @@ if hasattr(sys.stdout, "reconfigure"):
         # Some IDEs / redirected stdout may not support reconfigure.
         pass
 
-# Index of the tool diameter within the feature vector (zero-based).
-TOOL_DIAMETER_INDEX = 5
+FEATURE_NAMES_V1: list[str] = [
+    "bbox_x_mm",
+    "bbox_y_mm",
+    "bbox_z_mm",
+    "surface_area_mm2",
+    "user_step_over_mm",
+    "tool_diameter_mm",
+]
+
+FEATURE_NAMES_V2: list[str] = [
+    "bbox_x_mm",
+    "bbox_y_mm",
+    "bbox_z_mm",
+    "surface_area_mm2",
+    "volume_mm3",
+    "slope_bin_0_15",
+    "slope_bin_15_30",
+    "slope_bin_30_45",
+    "slope_bin_45_60",
+    "slope_bin_60_90",
+    "mean_curvature_rad",
+    "curvature_variance_rad2",
+    "flat_area_ratio",
+    "steep_area_ratio",
+    "pocket_depth_mm",
+    "user_step_over_mm",
+    "tool_diameter_mm",
+]
+
+
+def get_feature_names(use_v2: bool) -> list[str]:
+    return list(FEATURE_NAMES_V2 if use_v2 else FEATURE_NAMES_V1)
+
+
+def build_feature_scale(use_v2: bool) -> torch.Tensor:
+    if use_v2:
+        values = [
+            100.0,  # bbox_x_mm
+            100.0,  # bbox_y_mm
+            100.0,  # bbox_z_mm
+            10000.0,  # surface area
+            1_000_000.0,  # volume
+            1.0,  # slope bin 0-15
+            1.0,  # slope bin 15-30
+            1.0,  # slope bin 30-45
+            1.0,  # slope bin 45-60
+            1.0,  # slope bin 60-90
+            1.0,  # mean curvature
+            1.0,  # curvature variance
+            1.0,  # flat ratio
+            1.0,  # steep ratio
+            100.0,  # pocket depth
+            10.0,  # user step-over
+            10.0,  # tool diameter
+        ]
+    else:
+        values = [100.0, 100.0, 100.0, 10000.0, 10.0, 10.0]
+    return torch.tensor(values, dtype=torch.float32)
 
 
 def set_seed(seed: int) -> None:
@@ -54,12 +110,12 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
 
 
-def generate_sample(rng: np.random.Generator) -> Tuple[np.ndarray, int, float, float]:
+def generate_sample(rng: np.random.Generator, use_v2: bool) -> Tuple[np.ndarray, int, float, float]:
     """
     Produce a single synthetic training sample.
 
     Returns:
-        features: float32 vector of length 6
+        features: float32 vector of length 6 (v1) or 17 (v2)
         strategy_idx: 0 (raster) or 1 (waterline)
         angle_deg: target finishing angle in degrees
         step_over_mm: desired step-over in millimetres
@@ -72,6 +128,7 @@ def generate_sample(rng: np.random.Generator) -> Tuple[np.ndarray, int, float, f
         bbox_x, bbox_y = bbox_y, bbox_x
 
     surface_area = 2.0 * (bbox_x * bbox_y + bbox_x * bbox_z + bbox_y * bbox_z)
+    volume = bbox_x * bbox_y * bbox_z
 
     tool_diameter = float(rng.uniform(3.0, 12.0))
     step_hint = float(tool_diameter * rng.uniform(0.35, 0.55))
@@ -79,17 +136,44 @@ def generate_sample(rng: np.random.Generator) -> Tuple[np.ndarray, int, float, f
     flatness_ratio = bbox_z / max(bbox_x, bbox_y)
     aspect_zx = bbox_z / max(bbox_x, 1e-6)
 
-    features = np.array(
-        [
-            bbox_x,
-            bbox_y,
-            bbox_z,
-            surface_area,
-            step_hint,
-            tool_diameter,
-        ],
-        dtype=np.float32,
-    )
+    if use_v2:
+        slope_bins = rng.dirichlet(np.ones(5, dtype=np.float32)).astype(np.float32)
+        flat_ratio = float(slope_bins[0])
+        steep_ratio = float(slope_bins[-1])
+        mean_curv = float(abs(rng.normal(loc=0.08, scale=0.04)))
+        var_curv = float(abs(rng.normal(loc=0.02, scale=0.01)))
+        pocket_depth = float(bbox_z * rng.uniform(0.6, 1.0))
+        area_with_noise = float(surface_area * rng.uniform(0.85, 1.15))
+        volume_with_noise = float(volume * rng.uniform(0.85, 1.15))
+        head = np.array(
+            [bbox_x, bbox_y, bbox_z, area_with_noise, volume_with_noise],
+            dtype=np.float32,
+        )
+        tail = np.array(
+            [
+                mean_curv,
+                var_curv,
+                flat_ratio,
+                steep_ratio,
+                pocket_depth,
+                step_hint,
+                tool_diameter,
+            ],
+            dtype=np.float32,
+        )
+        features = np.concatenate((head, slope_bins, tail))
+    else:
+        features = np.array(
+            [
+                bbox_x,
+                bbox_y,
+                bbox_z,
+                surface_area,
+                step_hint,
+                tool_diameter,
+            ],
+            dtype=np.float32,
+        )
 
     # Label heuristics influenced by flatness and aspect metrics.
     # Introduce mild stochasticity so training is non-trivial.
@@ -120,10 +204,10 @@ def generate_sample(rng: np.random.Generator) -> Tuple[np.ndarray, int, float, f
     step_over = float(max(step_over, tool_diameter * 0.1))
     angle_deg = float(np.clip(angle_deg, 0.0, 180.0))
 
-    return features, strategy_idx, angle_deg, step_over
+    return features.astype(np.float32, copy=False), strategy_idx, angle_deg, step_over
 
 
-def build_dataset(num_samples: int, seed: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def build_dataset(num_samples: int, seed: int, use_v2: bool) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Generate an entire synthetic dataset."""
     rng = np.random.default_rng(seed)
     features = []
@@ -131,7 +215,7 @@ def build_dataset(num_samples: int, seed: int) -> Tuple[np.ndarray, np.ndarray, 
     angles = []
     steps = []
     for _ in range(num_samples):
-        feat, strategy, angle, step = generate_sample(rng)
+        feat, strategy, angle, step = generate_sample(rng, use_v2)
         features.append(feat)
         strategies.append(strategy)
         angles.append(angle)
@@ -174,10 +258,15 @@ class StrategyDataset(Dataset):
 class StrategyModel(nn.Module):
     """Two-layer MLP with task-specific heads."""
 
-    def __init__(self, input_dim: int) -> None:
+    def __init__(self, input_dim: int, tool_index: int, feature_scale: torch.Tensor) -> None:
         super().__init__()
-        if input_dim != 6:
-            raise ValueError(f"StrategyModel expects 6 input features, received {input_dim}.")
+        if feature_scale.numel() != input_dim:
+            raise ValueError(
+                f"StrategyModel expected feature_scale with {input_dim} elements, got {feature_scale.numel()}"
+            )
+        if not 0 <= tool_index < input_dim:
+            raise ValueError(f"Tool diameter index {tool_index} is out of range for {input_dim} features.")
+
         self.backbone = nn.Sequential(
             nn.Linear(input_dim, 64),
             nn.ReLU(inplace=True),
@@ -187,17 +276,15 @@ class StrategyModel(nn.Module):
         self.head_cls = nn.Linear(64, 2)
         self.head_angle = nn.Linear(64, 1)
         self.head_step = nn.Linear(64, 1)
-        self.register_buffer(
-            "feature_scale",
-            torch.tensor([100.0, 100.0, 100.0, 10000.0, 10.0, 10.0], dtype=torch.float32),
-        )
+        self.register_buffer("feature_scale", feature_scale.clone().detach().float())
+        self.tool_index = int(tool_index)
 
     def forward(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         scale = self.feature_scale.to(features.dtype)
         latent = self.backbone(features / scale)
         logits = self.head_cls(latent)
         angle = torch.sigmoid(self.head_angle(latent)) * 180.0
-        tool_diameter = features[:, TOOL_DIAMETER_INDEX : TOOL_DIAMETER_INDEX + 1]
+        tool_diameter = features[:, self.tool_index : self.tool_index + 1]
         step_over = torch.sigmoid(self.head_step(latent)) * (tool_diameter * 0.9)
         return logits, angle, step_over
 
@@ -274,6 +361,8 @@ def train_model(
     lr: float,
     val_split: float,
     seed: int,
+    tool_index: int,
+    feature_scale: torch.Tensor,
 ) -> Tuple[StrategyModel, Metrics, int]:
     """Train the model with early stopping."""
     dataset_size = len(dataset)
@@ -290,7 +379,7 @@ def train_model(
     train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, generator=gen)
     val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False)
 
-    model = StrategyModel(dataset.features.shape[1]).to(device)
+    model = StrategyModel(dataset.features.shape[1], tool_index, feature_scale).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion_cls = nn.CrossEntropyLoss()
     l1_loss = nn.L1Loss()
@@ -409,18 +498,17 @@ def write_json(path: Path, payload: dict) -> None:
         json.dump(payload, handle, indent=2, sort_keys=True)
 
 
-def build_interface_schema(input_dim: int) -> Dict[str, list[dict]]:
+def build_interface_schema(feature_names: list[str]) -> Dict[str, object]:
     """Describe the expected ONNX/TorchScript interface."""
-    return {
+    input_dim = len(feature_names)
+    description = "Feature vector order: " + ", ".join(feature_names)
+    schema: Dict[str, object] = {
         "inputs": [
             {
                 "name": "features",
                 "shape": ["batch", input_dim],
                 "dtype": "float32",
-                "description": (
-                    "Feature vector: [bbox_x_mm, bbox_y_mm, bbox_z_mm, "
-                    "surface_area_mm2, user_step_over_mm, tool_diameter_mm]"
-                ),
+                "description": description,
             }
         ],
         "outputs": [
@@ -444,6 +532,8 @@ def build_interface_schema(input_dim: int) -> Dict[str, list[dict]]:
             },
         ],
     }
+    schema["feature_names"] = feature_names
+    return schema
 
 
 def make_model_card(
@@ -452,6 +542,7 @@ def make_model_card(
     best_epoch: int,
     args: argparse.Namespace,
     schema: dict,
+    feature_version: str,
 ) -> dict:
     """Assemble a lightweight model card."""
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -468,7 +559,7 @@ def make_model_card(
             "onnx": str(args.output_dir / args.onnx_name),
             "onnx_json": str(args.output_dir / args.onnx_json_name),
         },
-        "interface": schema,
+        "interface": {**schema, "feature_version": feature_version},
         "training": {
             "epochs_run": int(args.epochs),
             "best_epoch": int(best_epoch),
@@ -515,6 +606,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step-weight", type=float, default=2.0, help="Weight for step-over L1 loss.")
     parser.add_argument("--val-split", type=float, default=0.2, help="Validation split fraction.")
     parser.add_argument(
+        "--v2-features",
+        action="store_true",
+        help="Use extended geometry-aware features (bbox, slopes, curvature, pocket depth).",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("models"),
@@ -533,9 +629,19 @@ def main() -> None:
     args = parse_args()
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
 
+    use_v2 = args.v2_features
+    feature_names = get_feature_names(use_v2)
+    feature_scale = build_feature_scale(use_v2)
+    tool_index = len(feature_names) - 1
+    feature_version = "v2" if use_v2 else "v1"
+
     set_seed(args.seed)
-    features, strategies, angles, steps = build_dataset(args.samples, args.seed)
+    features, strategies, angles, steps = build_dataset(args.samples, args.seed, use_v2)
     dataset = StrategyDataset(features, strategies, angles, steps)
+
+    if features.shape[0] > 0:
+        preview = ", ".join(f"{v:.3f}" for v in features[0][: min(5, features.shape[1])])
+        print(f"[train_strategy] Feature dim: {features.shape[1]} ({feature_version}); preview: [{preview}]")
 
     model, val_metrics, best_epoch = train_model(
         dataset,
@@ -548,6 +654,8 @@ def main() -> None:
         lr=args.learning_rate,
         val_split=args.val_split,
         seed=args.seed,
+        tool_index=tool_index,
+        feature_scale=feature_scale,
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -562,7 +670,7 @@ def main() -> None:
     onnx_path = args.output_dir / args.onnx_name
     export_onnx(model_cpu, example_cpu, onnx_path, args.opset)
 
-    schema = build_interface_schema(features.shape[1])
+    schema = build_interface_schema(feature_names)
     write_json(args.output_dir / args.onnx_json_name, schema)
 
     model_card = make_model_card(
@@ -571,6 +679,7 @@ def main() -> None:
         best_epoch,
         args,
         schema,
+        feature_version,
     )
     write_json(args.output_dir / args.model_card_name, model_card)
 

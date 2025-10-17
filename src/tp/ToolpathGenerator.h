@@ -29,6 +29,10 @@ struct UserParams
     double feed{800.0};
     double spindle{12'000.0};
     double rasterAngleDeg{0.0};
+    bool enableRoughPass{true};
+    bool enableFinishPass{true};
+    double stockAllowance_mm{0.3};
+    double rampAngleDeg{3.0};
     bool useHeightField{true};
     CutterType cutterType{CutterType::FlatEndmill};
     Stock stock{makeDefaultStock()};
@@ -49,9 +53,12 @@ public:
                       std::string* bannerMessage = nullptr) const;
 
 private:
+    struct PassProfile;
+
     Toolpath generateRasterTopography(const render::Model& model,
                                       const UserParams& params,
                                       const ai::StrategyDecision& decision,
+                                      const PassProfile& profile,
                                       const std::atomic<bool>& cancelFlag,
                                       const std::function<void(int)>& progressCallback,
                                       std::string* logMessage) const;
@@ -59,13 +66,15 @@ private:
     Toolpath generateWaterlineSlicer(const render::Model& model,
                                      const UserParams& params,
                                      const ai::StrategyDecision& decision,
+                                     const PassProfile& profile,
                                      const std::atomic<bool>& cancelFlag,
                                      const std::function<void(int)>& progressCallback,
-                                     std::string* logMessage) const;
+                                      std::string* logMessage) const;
 
     Toolpath generateFallbackRaster(const render::Model& model,
                                     const UserParams& params,
                                     const ai::StrategyDecision& decision,
+                                    const PassProfile& profile,
                                     const std::atomic<bool>& cancelFlag,
                                     const std::function<void(int)>& progressCallback) const;
 };

@@ -28,6 +28,11 @@ struct StrategyDecision
     Strategy strat{Strategy::Raster};
     double rasterAngleDeg{0.0};
     double stepOverMM{0.0};
+    /**
+     * The generator combines these pass flags with user preferences. When both
+     * are enabled the generated schedule runs the roughing stage first, then
+     * a finishing pass that consumes the roughing allowance.
+     */
     bool roughPass{true};
     bool finishPass{true};
 };

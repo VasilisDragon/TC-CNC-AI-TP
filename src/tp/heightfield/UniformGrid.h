@@ -33,8 +33,18 @@ private:
         glm::dvec3 v0;
         glm::dvec3 v1;
         glm::dvec3 v2;
+        glm::dvec3 centroid;
         glm::dvec3 bboxMin;
         glm::dvec3 bboxMax;
+        double maxZ{0.0};
+        double minZ{0.0};
+        double boundingRadiusSq{0.0};
+    };
+
+    struct CellRange
+    {
+        std::uint32_t offset{0};
+        std::uint32_t count{0};
     };
 
     [[nodiscard]] static Triangle makeTriangle(const render::Model& model, std::size_t index);
@@ -47,8 +57,8 @@ private:
     std::size_t m_rows{0};
 
     std::vector<Triangle> m_triangles;
-    std::vector<std::vector<std::uint32_t>> m_cells;
+    std::vector<CellRange> m_cellRanges;
+    std::vector<std::uint32_t> m_cellTriangleIndices;
 };
 
 } // namespace tp::heightfield
-

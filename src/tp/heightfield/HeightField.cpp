@@ -4,8 +4,21 @@
 #include <chrono>
 #include <cmath>
 #include <execution>
+#include <functional>
 #include <limits>
 #include <numeric>
+#include <thread>
+#include <vector>
+
+#include "common/logging.h"
+
+#include <QtCore/QCoreApplication>
+#include <QtCore/QString>
+#include <QtCore/QStringView>
+#include <QtCore/QStringList>
+
+#include <cstdlib>
+#include <atomic>
 
 namespace tp::heightfield
 {
@@ -14,6 +27,117 @@ namespace
 {
 constexpr double kNan = std::numeric_limits<double>::quiet_NaN();
 constexpr double kEpsilon = 1e-9;
+
+class ScopedTimer
+{
+public:
+    using Callback = std::function<void(const QString&, double, bool)>;
+
+    ScopedTimer(QString label, Callback callback, const std::atomic<bool>* cancelFlag = nullptr)
+        : m_label(std::move(label))
+        , m_callback(std::move(callback))
+        , m_cancel(cancelFlag)
+        , m_start(std::chrono::steady_clock::now())
+    {
+    }
+
+    ~ScopedTimer()
+    {
+        const auto elapsed = std::chrono::steady_clock::now() - m_start;
+        const double ms = std::chrono::duration<double, std::milli>(elapsed).count();
+        const bool cancelled = m_cancel != nullptr && m_cancel->load(std::memory_order_relaxed);
+        if (m_callback)
+        {
+            m_callback(m_label, ms, cancelled);
+        }
+        else
+        {
+            if (cancelled)
+            {
+                common::logInfo(QStringLiteral("%1 cancelled after %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
+            }
+            else
+            {
+                common::logInfo(QStringLiteral("%1 took %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
+            }
+        }
+    }
+
+private:
+    QString m_label;
+    Callback m_callback;
+    const std::atomic<bool>* m_cancel{nullptr};
+    std::chrono::steady_clock::time_point m_start;
+};
+
+int parseThreadOverrideFromArgs()
+{
+    if (!QCoreApplication::instance())
+    {
+        return 0;
+    }
+
+    const QStringList args = QCoreApplication::arguments();
+    for (int i = 0; i < args.size(); ++i)
+    {
+        const QString& arg = args.at(i);
+        if (arg == QStringLiteral("--threads") && i + 1 < args.size())
+        {
+            bool ok = false;
+            const int value = args.at(i + 1).toInt(&ok);
+            if (ok)
+            {
+                return value;
+            }
+        }
+        else if (arg.startsWith(QStringLiteral("--threads=")))
+        {
+            const QStringView value = QStringView(arg).mid(QStringLiteral("--threads=").size());
+            bool ok = false;
+            const int parsed = value.toInt(&ok);
+            if (ok)
+            {
+                return parsed;
+            }
+        }
+    }
+    return 0;
+}
+
+int threadOverride()
+{
+    static const int overrideValue = []() {
+        int value = 0;
+        if (const char* env = std::getenv("CNCTC_THREADS"))
+        {
+            char* endPtr = nullptr;
+            const long envValue = std::strtol(env, &endPtr, 10);
+            if (endPtr != env && envValue > 0 && envValue <= std::numeric_limits<int>::max())
+            {
+                value = static_cast<int>(envValue);
+            }
+        }
+
+        if (value <= 0)
+        {
+            const int argValue = parseThreadOverrideFromArgs();
+            if (argValue > 0)
+            {
+                value = argValue;
+            }
+        }
+
+        return std::max(0, value);
+    }();
+    return overrideValue;
+}
+
+struct RowRange
+{
+    std::size_t begin{0};
+    std::size_t end{0};
+};
+
 } // namespace
 
 bool HeightField::build(const UniformGrid& grid,
@@ -36,37 +160,124 @@ bool HeightField::build(const UniformGrid& grid,
     m_samples.assign(m_columns * m_rows, kNan);
     m_coverage.assign(m_columns * m_rows, 0);
 
-    const auto startTime = std::chrono::steady_clock::now();
+    const auto hardwareThreads = std::max(1u, std::thread::hardware_concurrency());
+    const int userOverride = threadOverride();
+    const std::size_t effectiveThreads = static_cast<std::size_t>(std::max<int>(1, (userOverride > 0) ? userOverride
+                                                                                                      : static_cast<int>(hardwareThreads)));
 
-    std::vector<std::size_t> rowIndices(m_rows);
-    std::iota(rowIndices.begin(), rowIndices.end(), 0);
+    const QString timerLabel = QStringLiteral("HeightField build (%1x%2 @ %3 mm, threads=%4)")
+                                   .arg(static_cast<qulonglong>(m_columns))
+                                   .arg(static_cast<qulonglong>(m_rows))
+                                   .arg(m_resolution, 0, 'f', 3)
+                                   .arg(static_cast<qulonglong>(effectiveThreads));
 
     std::atomic<std::size_t> validCounter{0};
+    double elapsedMs = 0.0;
 
-    std::for_each(std::execution::par, rowIndices.begin(), rowIndices.end(), [&](std::size_t row) {
-        if (cancelFlag.load(std::memory_order_relaxed))
+    {
+        ScopedTimer timer(timerLabel,
+                          [&](const QString& label, double ms, bool cancelled) {
+                              elapsedMs = ms;
+                              const std::size_t coverageCount = validCounter.load(std::memory_order_relaxed);
+                              const std::size_t total = m_columns * m_rows;
+                              const double ratio =
+                                  (total > 0) ? (static_cast<double>(coverageCount) / static_cast<double>(total)) : 0.0;
+                              const std::size_t gridBytes =
+                                  m_samples.size() * sizeof(double) + m_coverage.size() * sizeof(std::uint8_t);
+
+                              if (cancelled)
+                              {
+                                  common::logInfo(QStringLiteral("%1 cancelled after %2 ms (valid=%3/%4, %5%% coverage)")
+                                                      .arg(label)
+                                                      .arg(ms, 0, 'f', 2)
+                                                      .arg(static_cast<qulonglong>(coverageCount))
+                                                      .arg(static_cast<qulonglong>(total))
+                                                      .arg(ratio * 100.0, 0, 'f', 1));
+                                  return;
+                              }
+                              common::logInfo(
+                                  QStringLiteral("%1 completed in %2 ms (valid=%3/%4, %5%% coverage, grid=%6 bytes)")
+                                      .arg(label)
+                                      .arg(ms, 0, 'f', 2)
+                                      .arg(static_cast<qulonglong>(coverageCount))
+                                      .arg(static_cast<qulonglong>(total))
+                                      .arg(ratio * 100.0, 0, 'f', 1)
+                                      .arg(static_cast<qulonglong>(gridBytes)));
+                          },
+                          &cancelFlag);
+
+        std::vector<RowRange> workItems;
+        const std::size_t totalRows = m_rows;
+        const std::size_t baseChunk = (totalRows >= effectiveThreads)
+                                          ? std::max<std::size_t>(1, totalRows / (effectiveThreads * 4))
+                                          : 1;
+        const std::size_t chunkSize = std::max<std::size_t>(16, baseChunk);
+
+        for (std::size_t row = 0; row < totalRows; row += chunkSize)
         {
-            return;
+            workItems.push_back(RowRange{row, std::min(totalRows, row + chunkSize)});
         }
 
-        const double y = m_minY + static_cast<double>(row) * m_resolution;
-        for (std::size_t col = 0; col < m_columns; ++col)
-        {
-            if (cancelFlag.load(std::memory_order_relaxed))
-            {
-                return;
-            }
+        const bool runParallel = effectiveThreads > 1 && workItems.size() > 1;
 
-            const double x = m_minX + static_cast<double>(col) * m_resolution;
-            double z = 0.0;
-            if (grid.sampleMaxZAtXY(x, y, z))
+        const auto worker = [&](const RowRange& range) {
+            std::size_t localValid = 0;
+            for (std::size_t row = range.begin; row < range.end; ++row)
             {
-                m_samples[offset(col, row)] = z;
-                m_coverage[offset(col, row)] = 1;
-                validCounter.fetch_add(1, std::memory_order_relaxed);
+                if (cancelFlag.load(std::memory_order_relaxed))
+                {
+                    break;
+                }
+
+                const double y = m_minY + static_cast<double>(row) * m_resolution;
+                const std::size_t rowOffset = row * m_columns;
+                for (std::size_t col = 0; col < m_columns; ++col)
+                {
+                    if (cancelFlag.load(std::memory_order_relaxed))
+                    {
+                        break;
+                    }
+
+                    const double x = m_minX + static_cast<double>(col) * m_resolution;
+                    double z = 0.0;
+                    if (grid.sampleMaxZAtXY(x, y, z))
+                    {
+                        const std::size_t sampleIndex = rowOffset + col;
+                        m_samples[sampleIndex] = z;
+                        m_coverage[sampleIndex] = 1;
+                        ++localValid;
+                    }
+                }
+            }
+            return localValid;
+        };
+
+        if (runParallel)
+        {
+            std::for_each(std::execution::par, workItems.begin(), workItems.end(), [&](const RowRange& range) {
+                const std::size_t local = worker(range);
+                if (local > 0)
+                {
+                    validCounter.fetch_add(local, std::memory_order_relaxed);
+                }
+            });
+        }
+        else
+        {
+            for (const RowRange& range : workItems)
+            {
+                const std::size_t local = worker(range);
+                if (local > 0)
+                {
+                    validCounter.fetch_add(local, std::memory_order_relaxed);
+                }
+                if (cancelFlag.load(std::memory_order_relaxed))
+                {
+                    break;
+                }
             }
         }
-    });
+    }
 
     if (cancelFlag.load(std::memory_order_relaxed))
     {
@@ -76,8 +287,7 @@ bool HeightField::build(const UniformGrid& grid,
 
     if (stats)
     {
-        const auto elapsed = std::chrono::steady_clock::now() - startTime;
-        stats->buildMilliseconds = std::chrono::duration<double, std::milli>(elapsed).count();
+        stats->buildMilliseconds = elapsedMs;
         stats->validSamples = validCounter.load(std::memory_order_relaxed);
         stats->totalSamples = m_columns * m_rows;
     }
@@ -165,4 +375,3 @@ bool HeightField::interpolate(double x, double y, double& zOut) const
 }
 
 } // namespace tp::heightfield
-
