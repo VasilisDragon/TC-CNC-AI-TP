@@ -91,6 +91,19 @@ public:
     ~MainWindow() override;
 
 private:
+    struct JobWidgets
+    {
+        QListWidgetItem* item{nullptr};
+        QWidget* container{nullptr};
+        QLabel* title{nullptr};
+        QLabel* subtitle{nullptr};
+        QProgressBar* progress{nullptr};
+        QLabel* status{nullptr};
+        QLabel* eta{nullptr};
+        QPushButton* cancel{nullptr};
+        train::TrainingManager::JobStatus snapshot;
+    };
+
     void createMenus();
     void createDockWidgets();
     void createJobsDock(QDockWidget* envDock);
@@ -144,6 +157,8 @@ private:
     void onGpuInfoChanged(const QString& info);
 
     void openModelFromFile();
+    void openSampleModel();
+    void generateDemoToolpath();
     void saveToolpathToFile();
     void resetCamera();
     void showAboutDialog();
@@ -184,6 +199,7 @@ private:
     QString jobStateLabel(train::TrainingManager::JobState state) const;
     QString jobEtaLabel(qint64 etaMs) const;
     QString jobTypeLabel(train::TrainingManager::JobType type) const;
+    void applyJobStatus(JobWidgets& widgets, const train::TrainingManager::JobStatus& status);
 
     render::ModelViewerWidget* m_viewer{nullptr};
     QListWidget* m_modelBrowser{nullptr};
@@ -200,8 +216,11 @@ private:
     QSlider* m_simSpeedSlider{nullptr};
     QLabel* m_simSpeedLabel{nullptr};
     QToolBar* m_cameraToolbar{nullptr};
+    QAction* m_openSampleAction{nullptr};
+    QAction* m_generateSampleAction{nullptr};
     bool m_simSliderPressed{false};
     bool m_updatingSimSlider{false};
+    bool m_generateDemoPending{false};
 
     enum class StockOriginMode
     {
@@ -294,18 +313,6 @@ private:
     QListWidget* m_jobsList{nullptr};
     QPlainTextEdit* m_jobLog{nullptr};
     QLabel* m_jobSelectionLabel{nullptr};
-    struct JobWidgets
-    {
-        QListWidgetItem* item{nullptr};
-        QWidget* container{nullptr};
-        QLabel* title{nullptr};
-        QLabel* subtitle{nullptr};
-        QProgressBar* progress{nullptr};
-        QLabel* status{nullptr};
-        QLabel* eta{nullptr};
-        QPushButton* cancel{nullptr};
-        train::TrainingManager::JobStatus snapshot;
-    };
     QHash<QUuid, JobWidgets> m_jobWidgets;
     QHash<QUuid, QStringList> m_jobLogs;
     QUuid m_selectedJob;

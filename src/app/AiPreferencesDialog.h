@@ -18,6 +18,7 @@ public:
 
     void setForceCpu(bool checked);
     bool forceCpu() const;
+    void setGpuAvailable(bool available);
 
     void setModelInfo(const QString& name,
                       const QString& path,
@@ -33,7 +34,7 @@ public:
     void forceCpuChanged(bool checked);
 
 private slots:
-    void onForceCpuToggled(bool checked);
+    void onDevicePreferenceChanged(int index);
     void onTestClicked();
 
 private:

@@ -105,11 +105,32 @@
     </layout>
    </item>
    <item>
-    <widget class="QCheckBox" name="forceCpuCheckBox">
-     <property name="text">
-      <string>Force CPU inference</string>
-     </property>
-    </widget>
+    <layout class="QHBoxLayout" name="devicePreferenceLayout">
+     <item>
+      <widget class="QLabel" name="preferenceLabel">
+       <property name="text">
+        <string>Inference preference</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="devicePreferenceCombo">
+       <property name="toolTip">
+        <string>Select whether to prioritise GPU acceleration or force CPU execution.</string>
+       </property>
+       <item>
+        <property name="text">
+         <string>Auto (GPU when available)</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>CPU only</string>
+        </property>
+       </item>
+      </widget>
+     </item>
+    </layout>
    </item>
    <item>
     <layout class="QHBoxLayout" name="testLayout">

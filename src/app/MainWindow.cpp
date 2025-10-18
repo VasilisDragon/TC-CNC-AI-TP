@@ -4,6 +4,8 @@
 #include "app/AiPreferencesDialog.h"
 #include "app/BuildInfo.h"
 #include "app/ToolpathSettingsWidget.h"
+#include "app/TrainingNewModelDialog.h"
+#include "app/TrainingSyntheticDataDialog.h"
 #include "common/ToolLibrary.h"
 #include "common/Units.h"
 #include "ai/ModelManager.h"
@@ -54,6 +56,9 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QAbstractItemView>
+#include <QGridLayout>
+#include <QTextCursor>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -186,6 +191,21 @@ double runtimeLatencyMs(const ai::IPathAI* ai)
     }
 #endif
     return 0.0;
+}
+
+bool runtimeSupportsGpu(const ai::IPathAI* ai)
+{
+    if (const auto* torchAi = dynamic_cast<const ai::TorchAI*>(ai))
+    {
+        return torchAi->hasCudaSupport();
+    }
+#ifdef AI_WITH_ONNXRUNTIME
+    if (const auto* onnxAi = dynamic_cast<const ai::OnnxAI*>(ai))
+    {
+        return onnxAi->hasCudaSupport();
+    }
+#endif
+    return false;
 }
 
 void setRuntimeForceCpu(ai::IPathAI* ai, bool forceCpu)
@@ -366,6 +386,17 @@ void MainWindow::createMenus()
         connect(openAction.get(), &QAction::triggered, this, &MainWindow::openModelFromFile);
         fileMenu->addAction(openAction.release());
 
+        auto sampleAction = makeAction(this, tr("Open &Sample Part"));
+        connect(sampleAction.get(), &QAction::triggered, this, &MainWindow::openSampleModel);
+        m_openSampleAction = sampleAction.get();
+        fileMenu->addAction(sampleAction.release());
+
+        auto demoAction = makeAction(this, tr("Generate &Demo Toolpath"));
+        connect(demoAction.get(), &QAction::triggered, this, &MainWindow::generateDemoToolpath);
+        m_generateSampleAction = demoAction.get();
+        m_generateSampleAction->setEnabled(false);
+        fileMenu->addAction(demoAction.release());
+
         auto saveAction = makeAction(this, tr("&Save Toolpath..."), QKeySequence::Save);
         connect(saveAction.get(), &QAction::triggered, this, &MainWindow::saveToolpathToFile);
         fileMenu->addAction(saveAction.release());
@@ -400,6 +431,8 @@ void MainWindow::createMenus()
         connect(preferencesAction.get(), &QAction::triggered, this, &MainWindow::openAiPreferences);
         aiMenu->addAction(preferencesAction.release());
     }
+
+    createTrainingMenu();
 
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
     {
@@ -476,6 +509,746 @@ void MainWindow::createDockWidgets()
     connect(m_toolpathSettings, &ToolpathSettingsWidget::toolChanged, this, &MainWindow::onToolSelected);
     connect(m_toolpathSettings, &ToolpathSettingsWidget::warningGenerated, this, &MainWindow::logWarning);
     connect(m_aiModelCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onAiComboChanged);
+
+    auto* envDock = new QDockWidget(tr("Training Environment"), this);
+    envDock->setObjectName(QStringLiteral("TrainingEnvironmentDock"));
+    auto* envContainer = new QWidget(envDock);
+    auto* envLayout = new QVBoxLayout(envContainer);
+    envLayout->setContentsMargins(12, 12, 12, 12);
+    envLayout->setSpacing(8);
+
+    auto* envDescription = new QLabel(tr("Prepare the embedded Python environment before launching training jobs."));
+    envDescription->setWordWrap(true);
+    envLayout->addWidget(envDescription);
+
+    auto* envButtonLayout = new QHBoxLayout();
+    m_envPrepareButton = new QPushButton(tr("Prepare Environment"), envContainer);
+    m_envCancelButton = new QPushButton(tr("Cancel"), envContainer);
+    m_envCancelButton->setEnabled(false);
+    envButtonLayout->addWidget(m_envPrepareButton);
+    envButtonLayout->addWidget(m_envCancelButton);
+    envButtonLayout->addStretch(1);
+    envLayout->addLayout(envButtonLayout);
+
+    m_envCpuOnlyCheck = new QCheckBox(tr("CPU-only training"), envContainer);
+    envLayout->addWidget(m_envCpuOnlyCheck);
+
+    m_envProgress = new QProgressBar(envContainer);
+    m_envProgress->setRange(0, 100);
+    m_envProgress->setValue(0);
+    envLayout->addWidget(m_envProgress);
+
+    m_envGpuLabel = new QLabel(tr("GPU: Detecting..."), envContainer);
+    m_envGpuLabel->setWordWrap(true);
+    envLayout->addWidget(m_envGpuLabel);
+
+    m_envLog = new QPlainTextEdit(envContainer);
+    m_envLog->setReadOnly(true);
+    m_envLog->setMaximumBlockCount(2000);
+    m_envLog->setPlaceholderText(tr("Environment preparation logs will appear here."));
+    envLayout->addWidget(m_envLog, 1);
+
+    envContainer->setLayout(envLayout);
+    envDock->setWidget(envContainer);
+    addDockWidget(Qt::RightDockWidgetArea, envDock);
+
+    createJobsDock(envDock);
+
+    connect(m_envPrepareButton, &QPushButton::clicked, this, &MainWindow::startEnvironmentPreparation);
+    connect(m_envCancelButton, &QPushButton::clicked, this, &MainWindow::cancelEnvironmentPreparation);
+    connect(m_envCpuOnlyCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        if (m_envManager)
+        {
+            m_envManager->setCpuOnly(checked);
+            appendEnvLog(checked ? tr("Training will run in CPU-only mode.")
+                                 : tr("Training will leverage GPU acceleration when available."));
+            updateTrainingActions();
+        }
+    });
+
+    ensureTrainingManager();
+    updateEnvironmentControls(m_envManager && m_envManager->isBusy());
+    updateTrainingActions();
+}
+
+void MainWindow::createJobsDock(QDockWidget* envDock)
+{
+    m_jobsDock = new QDockWidget(tr("Training Jobs"), this);
+    m_jobsDock->setObjectName(QStringLiteral("TrainingJobsDock"));
+
+    auto* container = new QWidget(m_jobsDock);
+    auto* layout = new QVBoxLayout(container);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(8);
+
+    m_jobsList = new QListWidget(container);
+    m_jobsList->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_jobsList->setAlternatingRowColors(true);
+    m_jobsList->setSpacing(6);
+    layout->addWidget(m_jobsList, 2);
+
+    m_jobSelectionLabel = new QLabel(tr("Select a job to view logs."), container);
+    m_jobSelectionLabel->setWordWrap(true);
+    layout->addWidget(m_jobSelectionLabel);
+
+    m_jobLog = new QPlainTextEdit(container);
+    m_jobLog->setReadOnly(true);
+    m_jobLog->setMaximumBlockCount(4000);
+    m_jobLog->setPlaceholderText(tr("Job output will appear here."));
+    layout->addWidget(m_jobLog, 3);
+
+    container->setLayout(layout);
+    m_jobsDock->setWidget(container);
+    addDockWidget(Qt::RightDockWidgetArea, m_jobsDock);
+    if (envDock)
+    {
+        tabifyDockWidget(envDock, m_jobsDock);
+        envDock->raise();
+    }
+
+    connect(m_jobsList, &QListWidget::currentItemChanged, this, &MainWindow::onJobSelectionChanged);
+}
+
+void MainWindow::ensureTrainingManager()
+{
+    if (!m_envManager)
+    {
+        m_envManager = new train::EnvManager(this);
+        connect(m_envManager, &train::EnvManager::progress, this, &MainWindow::onEnvProgress);
+        connect(m_envManager, &train::EnvManager::log, this, &MainWindow::appendEnvLog);
+        connect(m_envManager, &train::EnvManager::finished, this, &MainWindow::onEnvFinished);
+        connect(m_envManager, &train::EnvManager::error, this, &MainWindow::onEnvError);
+        connect(m_envManager, &train::EnvManager::gpuInfoChanged, this, &MainWindow::onGpuInfoChanged);
+
+        if (m_envCpuOnlyCheck)
+        {
+            QSignalBlocker blocker(m_envCpuOnlyCheck);
+            m_envCpuOnlyCheck->setChecked(m_envManager->cpuOnly());
+        }
+        if (m_envGpuLabel)
+        {
+            const QString summary = m_envManager->gpuSummary();
+            m_envGpuLabel->setText(summary.isEmpty() ? tr("GPU: Not detected") : summary);
+        }
+    }
+
+    if (!m_trainingManager)
+    {
+        m_trainingManager = new train::TrainingManager(this);
+        m_trainingManager->setEnvManager(m_envManager);
+        if (m_modelManager)
+        {
+            m_trainingManager->setModelManager(m_modelManager.get());
+        }
+
+        connect(m_trainingManager, &train::TrainingManager::jobAdded, this, &MainWindow::onTrainingJobAdded);
+        connect(m_trainingManager, &train::TrainingManager::jobUpdated, this, &MainWindow::onTrainingJobUpdated);
+        connect(m_trainingManager, &train::TrainingManager::jobRemoved, this, &MainWindow::onTrainingJobRemoved);
+        connect(m_trainingManager, &train::TrainingManager::jobLog, this, &MainWindow::onTrainingJobLog);
+        connect(m_trainingManager, &train::TrainingManager::toastRequested, this, &MainWindow::onTrainingToast);
+        connect(m_trainingManager, &train::TrainingManager::modelRegistered, this, &MainWindow::onTrainingModelRegistered);
+    }
+}
+
+bool MainWindow::isGpuAvailableForTraining() const
+{
+    if (!m_envManager || m_envManager->cpuOnly())
+    {
+        return false;
+    }
+    return !m_envManager->gpuSummary().isEmpty();
+}
+
+void MainWindow::updateTrainingActions()
+{
+    const bool envBusy = m_envManager && m_envManager->isBusy();
+    const bool allowTraining = m_envReady && !envBusy;
+
+    if (m_trainingNewModelAction)
+    {
+        m_trainingNewModelAction->setEnabled(allowTraining);
+    }
+    if (m_trainingSyntheticAction)
+    {
+        m_trainingSyntheticAction->setEnabled(allowTraining);
+    }
+    if (m_trainingFineTuneAction)
+    {
+        const bool hasModel = !m_aiModelPath.isEmpty();
+        m_trainingFineTuneAction->setEnabled(allowTraining && hasModel);
+    }
+    if (m_trainingOpenModelsAction)
+    {
+        m_trainingOpenModelsAction->setEnabled(true);
+    }
+    if (m_trainingOpenDatasetsAction)
+    {
+        m_trainingOpenDatasetsAction->setEnabled(true);
+    }
+}
+
+void MainWindow::startEnvironmentPreparation()
+{
+    ensureTrainingManager();
+    if (!m_envManager)
+    {
+        return;
+    }
+
+    m_envReady = false;
+    updateTrainingActions();
+    if (m_envProgress)
+    {
+        m_envProgress->setRange(0, 100);
+        m_envProgress->setValue(0);
+    }
+    updateEnvironmentControls(true);
+    appendEnvLog(tr("Starting environment preparation..."));
+    m_envManager->prepareEnvironment(false);
+}
+
+void MainWindow::cancelEnvironmentPreparation()
+{
+    if (m_envManager)
+    {
+        m_envManager->cancel();
+    }
+}
+
+void MainWindow::appendEnvLog(const QString& text)
+{
+    if (text.isEmpty())
+    {
+        return;
+    }
+    logMessage(text);
+    if (m_envLog)
+    {
+        m_envLog->appendPlainText(text);
+        QTextCursor cursor = m_envLog->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        m_envLog->setTextCursor(cursor);
+    }
+}
+
+void MainWindow::updateEnvironmentControls(bool busy)
+{
+    if (m_envPrepareButton)
+    {
+        m_envPrepareButton->setEnabled(!busy);
+    }
+    if (m_envCancelButton)
+    {
+        m_envCancelButton->setEnabled(busy);
+    }
+    if (m_envCpuOnlyCheck)
+    {
+        m_envCpuOnlyCheck->setEnabled(!busy);
+    }
+    if (m_envProgress && !busy)
+    {
+        m_envProgress->setValue(m_envReady ? 100 : 0);
+    }
+    if (m_envGpuLabel && m_envManager)
+    {
+        const QString summary = m_envManager->gpuSummary();
+        m_envGpuLabel->setText(summary.isEmpty() ? tr("GPU: Not detected") : summary);
+    }
+}
+
+void MainWindow::onEnvProgress(int value)
+{
+    if (m_envProgress)
+    {
+        m_envProgress->setValue(std::clamp(value, 0, 100));
+    }
+}
+
+void MainWindow::onEnvFinished(bool success)
+{
+    m_envReady = success;
+    updateEnvironmentControls(false);
+    updateTrainingActions();
+
+    if (success)
+    {
+        appendEnvLog(tr("Environment is ready."));
+    }
+    else
+    {
+        appendEnvLog(tr("Environment preparation failed. Check logs for details."));
+    }
+}
+
+void MainWindow::onEnvError(const QString& message)
+{
+    if (!message.isEmpty())
+    {
+        appendEnvLog(message);
+        QMessageBox::warning(this, tr("Environment Error"), message);
+    }
+    updateEnvironmentControls(false);
+    updateTrainingActions();
+}
+
+void MainWindow::onGpuInfoChanged(const QString& info)
+{
+    if (m_envGpuLabel)
+    {
+        m_envGpuLabel->setText(info.isEmpty() ? tr("GPU: Not detected") : info);
+    }
+}
+
+void MainWindow::openTrainingNewModelDialog()
+{
+    ensureTrainingManager();
+    if (!m_trainingManager)
+    {
+        return;
+    }
+    if (!m_modelManager)
+    {
+        m_modelManager = std::make_unique<ai::ModelManager>();
+    }
+    m_modelManager->refresh();
+
+    TrainingNewModelDialog dialog(m_modelManager->models(), isGpuAvailableForTraining(), this);
+    dialog.setSuggestedDataset(m_trainingManager->datasetsRoot());
+
+    if (dialog.exec() != QDialog::Accepted)
+    {
+        return;
+    }
+
+    train::TrainingManager::TrainJobRequest request;
+    request.modelName = dialog.modelName();
+    request.baseModelPath = dialog.baseModelPath();
+    request.datasetPath = dialog.datasetPath();
+    request.device = dialog.device();
+    request.epochs = dialog.epochs();
+    request.learningRate = dialog.learningRate();
+    request.useV2Features = dialog.useV2Features();
+    request.fineTune = false;
+
+    m_trainingManager->enqueueTraining(request);
+}
+
+void MainWindow::openSyntheticDataDialog()
+{
+    ensureTrainingManager();
+    if (!m_trainingManager)
+    {
+        return;
+    }
+
+    TrainingSyntheticDataDialog dialog(m_trainingManager->datasetsRoot(), this);
+    if (dialog.exec() != QDialog::Accepted)
+    {
+        return;
+    }
+
+    train::TrainingManager::SyntheticJobRequest request;
+    request.label = dialog.datasetLabel();
+    request.outputDir = dialog.outputDirectory();
+    request.sampleCount = dialog.sampleCount();
+    request.diversity = dialog.diversity();
+    request.slopeMix = dialog.slopeMix();
+    request.overwrite = dialog.overwriteExisting();
+
+    m_trainingManager->enqueueSyntheticDataset(request);
+}
+
+void MainWindow::fineTuneCurrentModel()
+{
+    ensureTrainingManager();
+    if (!m_trainingManager)
+    {
+        return;
+    }
+
+    QString baseModel = m_aiModelPath;
+    if (baseModel.isEmpty())
+    {
+        QMessageBox::information(this,
+                                 tr("No Active Model"),
+                                 tr("Load an AI model before starting a fine-tune job."));
+        return;
+    }
+
+    if (!m_modelManager)
+    {
+        m_modelManager = std::make_unique<ai::ModelManager>();
+    }
+    m_modelManager->refresh();
+
+    TrainingNewModelDialog dialog(m_modelManager->models(), isGpuAvailableForTraining(), this);
+    dialog.lockBaseModel(baseModel);
+
+    const QString baseName = QFileInfo(baseModel).completeBaseName();
+    dialog.setSuggestedName(baseName + QStringLiteral("_ft"));
+    dialog.setSuggestedDataset(m_trainingManager->datasetsRoot());
+
+    if (dialog.exec() != QDialog::Accepted)
+    {
+        return;
+    }
+
+    train::TrainingManager::TrainJobRequest request;
+    request.modelName = dialog.modelName();
+    request.baseModelPath = baseModel;
+    request.datasetPath = dialog.datasetPath();
+    request.device = dialog.device();
+    request.epochs = dialog.epochs();
+    request.learningRate = dialog.learningRate();
+    request.useV2Features = dialog.useV2Features();
+    request.fineTune = true;
+
+    m_trainingManager->enqueueTraining(request);
+}
+
+void MainWindow::openModelsFolder()
+{
+    ensureTrainingManager();
+    if (!m_trainingManager)
+    {
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(m_trainingManager->modelsRoot()));
+}
+
+void MainWindow::openDatasetsFolder()
+{
+    ensureTrainingManager();
+    if (!m_trainingManager)
+    {
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(m_trainingManager->datasetsRoot()));
+}
+
+void MainWindow::onTrainingJobAdded(const train::TrainingManager::JobStatus& status)
+{
+    if (!m_jobsList)
+    {
+        return;
+    }
+
+    QListWidgetItem* item = new QListWidgetItem(m_jobsList);
+    item->setSizeHint(QSize(260, 96));
+    QWidget* widget = new QWidget(m_jobsList);
+    auto* layout = new QGridLayout(widget);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setHorizontalSpacing(8);
+    layout->setVerticalSpacing(4);
+
+    QLabel* title = new QLabel(widget);
+    QFont bold = title->font();
+    bold.setBold(true);
+    title->setFont(bold);
+
+    QLabel* subtitle = new QLabel(widget);
+    subtitle->setWordWrap(true);
+    subtitle->setStyleSheet(QStringLiteral("color: #b0b5c5;"));
+
+    QLabel* statusLabel = new QLabel(widget);
+    QLabel* etaLabel = new QLabel(widget);
+    etaLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    QProgressBar* progress = new QProgressBar(widget);
+    progress->setRange(0, 100);
+    progress->setValue(0);
+
+    QPushButton* cancelButton = new QPushButton(tr("Cancel"), widget);
+    cancelButton->setFixedWidth(80);
+
+    layout->addWidget(title, 0, 0, 1, 2);
+    layout->addWidget(etaLabel, 0, 2, Qt::AlignRight);
+    layout->addWidget(subtitle, 1, 0, 1, 3);
+    layout->addWidget(progress, 2, 0, 1, 2);
+    layout->addWidget(statusLabel, 3, 0, 1, 2);
+    layout->addWidget(cancelButton, 2, 2, 2, 1);
+
+    widget->setLayout(layout);
+    m_jobsList->setItemWidget(item, widget);
+
+    JobWidgets entry;
+    entry.item = item;
+    entry.container = widget;
+    entry.title = title;
+    entry.subtitle = subtitle;
+    entry.progress = progress;
+    entry.status = statusLabel;
+    entry.eta = etaLabel;
+    entry.cancel = cancelButton;
+    entry.snapshot = status;
+    m_jobWidgets.insert(status.id, entry);
+    m_jobLogs.insert(status.id, {});
+
+    item->setData(Qt::UserRole, status.id);
+
+    connect(cancelButton, &QPushButton::clicked, this, [this, id = status.id]() {
+        requestJobCancellation(id);
+    });
+
+    applyJobStatus(m_jobWidgets[status.id], status);
+    updateTrainingActions();
+}
+
+void MainWindow::onTrainingJobUpdated(const train::TrainingManager::JobStatus& status)
+{
+    if (!m_jobWidgets.contains(status.id))
+    {
+        onTrainingJobAdded(status);
+        return;
+    }
+
+    JobWidgets& widgets = m_jobWidgets[status.id];
+    widgets.snapshot = status;
+    applyJobStatus(widgets, status);
+    if (m_selectedJob == status.id)
+    {
+        updateJobLogView();
+    }
+}
+
+void MainWindow::onTrainingJobRemoved(const QUuid& id)
+{
+    if (!m_jobWidgets.contains(id))
+    {
+        return;
+    }
+    JobWidgets widgets = m_jobWidgets.take(id);
+
+    if (widgets.item)
+    {
+        QWidget* w = m_jobsList->itemWidget(widgets.item);
+        if (w)
+        {
+            m_jobsList->removeItemWidget(widgets.item);
+            w->deleteLater();
+        }
+        const int row = m_jobsList->row(widgets.item);
+        delete m_jobsList->takeItem(row);
+    }
+
+    m_jobLogs.remove(id);
+    if (m_selectedJob == id)
+    {
+        m_selectedJob = {};
+        m_jobSelectionLabel->setText(tr("Select a job to view logs."));
+        if (m_jobLog)
+        {
+            m_jobLog->clear();
+        }
+    }
+    updateTrainingActions();
+}
+
+void MainWindow::onTrainingJobLog(const QUuid& id, const QString& text)
+{
+    if (text.isEmpty())
+    {
+        return;
+    }
+    m_jobLogs[id].append(text);
+    if (m_selectedJob == id)
+    {
+        updateJobLogView();
+    }
+}
+
+void MainWindow::onTrainingToast(const QString& message)
+{
+    if (message.isEmpty())
+    {
+        return;
+    }
+    statusBar()->showMessage(message, 5000);
+    logMessage(message);
+}
+
+void MainWindow::onTrainingModelRegistered(const QString& path)
+{
+    logMessage(tr("Model registered: %1").arg(QDir::toNativeSeparators(path)));
+    refreshAiModels();
+    if (!path.isEmpty())
+    {
+        setActiveAiModel(path, false);
+    }
+}
+
+void MainWindow::onJobSelectionChanged()
+{
+    QListWidgetItem* current = m_jobsList ? m_jobsList->currentItem() : nullptr;
+    if (!current)
+    {
+        m_selectedJob = {};
+        if (m_jobSelectionLabel)
+        {
+            m_jobSelectionLabel->setText(tr("Select a job to view logs."));
+        }
+        if (m_jobLog)
+        {
+            m_jobLog->clear();
+        }
+        return;
+    }
+
+    const QUuid id = current->data(Qt::UserRole).toUuid();
+    m_selectedJob = id;
+    if (m_jobSelectionLabel && m_jobWidgets.contains(id))
+    {
+        m_jobSelectionLabel->setText(summarizeJob(m_jobWidgets.value(id).snapshot));
+    }
+    updateJobLogView();
+}
+
+void MainWindow::updateJobLogView()
+{
+    if (!m_jobLog)
+    {
+        return;
+    }
+    const QStringList lines = m_jobLogs.value(m_selectedJob);
+    m_jobLog->setPlainText(lines.join(QLatin1Char('\n')));
+    m_jobLog->moveCursor(QTextCursor::End);
+}
+
+void MainWindow::requestJobCancellation(const QUuid& id)
+{
+    if (m_trainingManager)
+    {
+        m_trainingManager->cancelJob(id);
+    }
+}
+
+QString MainWindow::summarizeJob(const train::TrainingManager::JobStatus& status) const
+{
+    const QString type = jobTypeLabel(status.type);
+    if (status.label.isEmpty())
+    {
+        return type;
+    }
+    return tr("%1 • %2").arg(type, status.label);
+}
+
+QString MainWindow::jobStateLabel(train::TrainingManager::JobState state) const
+{
+    switch (state)
+    {
+    case train::TrainingManager::JobState::Queued: return tr("Queued");
+    case train::TrainingManager::JobState::Running: return tr("Running");
+    case train::TrainingManager::JobState::Succeeded: return tr("Succeeded");
+    case train::TrainingManager::JobState::Failed: return tr("Failed");
+    case train::TrainingManager::JobState::Cancelled: return tr("Cancelled");
+    }
+    return tr("Unknown");
+}
+
+QString MainWindow::jobEtaLabel(qint64 etaMs) const
+{
+    if (etaMs <= 0)
+    {
+        return tr("--");
+    }
+    const qint64 totalSeconds = (etaMs + 500) / 1000;
+    const qint64 hours = totalSeconds / 3600;
+    const qint64 minutes = (totalSeconds % 3600) / 60;
+    const qint64 seconds = totalSeconds % 60;
+    if (hours > 0)
+    {
+        return tr("%1h %2m").arg(hours).arg(minutes, 2, 10, QLatin1Char('0'));
+    }
+    if (minutes > 0)
+    {
+        return tr("%1m %2s").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
+    }
+    return tr("%1s").arg(seconds);
+}
+
+QString MainWindow::jobTypeLabel(train::TrainingManager::JobType type) const
+{
+    switch (type)
+    {
+    case train::TrainingManager::JobType::SyntheticDataset: return tr("Synthetic dataset");
+    case train::TrainingManager::JobType::Train: return tr("Training");
+    case train::TrainingManager::JobType::FineTune: return tr("Fine-tune");
+    }
+    return tr("Job");
+}
+
+void MainWindow::applyJobStatus(JobWidgets& widgets, const train::TrainingManager::JobStatus& status)
+{
+    if (!widgets.title)
+    {
+        return;
+    }
+
+    widgets.title->setText(summarizeJob(status));
+    if (widgets.subtitle)
+    {
+        widgets.subtitle->setText(status.detail);
+    }
+    if (widgets.status)
+    {
+        widgets.status->setText(jobStateLabel(status.state));
+    }
+    if (widgets.eta)
+    {
+        if (status.state == train::TrainingManager::JobState::Running)
+        {
+            widgets.eta->setText(tr("ETA %1").arg(jobEtaLabel(status.etaMs)));
+        }
+        else
+        {
+            widgets.eta->setText(QString());
+        }
+    }
+
+    if (widgets.progress)
+    {
+        if (status.state == train::TrainingManager::JobState::Succeeded)
+        {
+            widgets.progress->setRange(0, 100);
+            widgets.progress->setValue(100);
+        }
+        else if (status.progress >= 0)
+        {
+            widgets.progress->setRange(0, 100);
+            widgets.progress->setValue(status.progress);
+        }
+        else
+        {
+            widgets.progress->setRange(0, 0);
+        }
+    }
+
+    if (widgets.cancel)
+    {
+        const bool cancellable = status.state == train::TrainingManager::JobState::Queued
+                                 || status.state == train::TrainingManager::JobState::Running;
+        widgets.cancel->setEnabled(cancellable);
+    }
+}
+
+void MainWindow::createTrainingMenu()
+{
+    auto* trainingMenu = menuBar()->addMenu(tr("&Training"));
+
+    m_trainingNewModelAction = trainingMenu->addAction(tr("New Model..."), this, &MainWindow::openTrainingNewModelDialog);
+    m_trainingSyntheticAction = trainingMenu->addAction(
+        tr("Generate Synthetic Data..."), this, &MainWindow::openSyntheticDataDialog);
+    m_trainingFineTuneAction = trainingMenu->addAction(
+        tr("Fine-Tune Current Model..."), this, &MainWindow::fineTuneCurrentModel);
+
+    trainingMenu->addSeparator();
+    m_trainingOpenModelsAction = trainingMenu->addAction(tr("Open Models Folder"), this, &MainWindow::openModelsFolder);
+    m_trainingOpenDatasetsAction =
+        trainingMenu->addAction(tr("Open Datasets Folder"), this, &MainWindow::openDatasetsFolder);
+
+    m_trainingNewModelAction->setEnabled(false);
+    m_trainingSyntheticAction->setEnabled(false);
+    m_trainingFineTuneAction->setEnabled(false);
 }
 
 void MainWindow::createCameraToolbar()
@@ -1195,7 +1968,12 @@ void MainWindow::refreshAiModels()
     m_aiModelCombo->setCurrentIndex(indexToSelect);
 
     const QString currentPath = m_aiModelCombo->currentData().toString();
+    if (m_trainingManager)
+    {
+        m_trainingManager->setModelManager(m_modelManager.get());
+    }
     setActiveAiModel(currentPath, true);
+    updateTrainingActions();
 }
 
 void MainWindow::startImportWorker(const QString& path)
@@ -1271,8 +2049,21 @@ void MainWindow::startImportWorker(const QString& path)
                 logMessage(tr("Import finished in %1 ms.").arg(elapsed));
                 displayToolpathMessage(tr("Loaded model: %1").arg(QFileInfo(path).fileName()));
 
+                if (m_generateSampleAction)
+                {
+                    m_generateSampleAction->setEnabled(true);
+                }
+
                 cleanupImport();
                 saveSettings();
+
+                if (m_generateDemoPending)
+                {
+                    m_generateDemoPending = false;
+                    QTimer::singleShot(0, this, [this]() {
+                        generateDemoToolpath();
+                    });
+                }
             });
 
     connect(m_importWorker,
@@ -1291,6 +2082,7 @@ void MainWindow::startImportWorker(const QString& path)
                     displayToolpathMessage(message);
                 }
                 cleanupImport();
+                m_generateDemoPending = false;
             });
 
     connect(m_importWorker, &QThread::finished, this, [this]() {
@@ -1693,6 +2485,7 @@ void MainWindow::openAiPreferences()
 
     AiPreferencesDialog dialog(this);
     dialog.setForceCpu(m_forceCpuInference);
+    dialog.setGpuAvailable(runtimeSupportsGpu(m_activeAiPrototype.get()));
 
     const bool previousForceCpu = m_forceCpuInference;
     setRuntimeForceCpu(m_activeAiPrototype.get(), dialog.forceCpu());
@@ -2013,6 +2806,7 @@ void MainWindow::loadSettings()
     const QString unitKey = settings.value(QStringLiteral("ui/unit"), common::unitKey(m_units)).toString();
     applyUnits(common::unitFromString(unitKey, m_units), true);
 
+    m_envReady = settings.value(QStringLiteral("training/envReady"), m_envReady).toBool();
     const QString toolId = settings.value(QStringLiteral("tool/id")).toString();
     m_aiModelPath = settings.value(QStringLiteral("ai/modelPath"), m_aiModelPath).toString();
     m_forceCpuInference = settings.value(QStringLiteral("ai/forceCpu"), m_forceCpuInference).toBool();
@@ -2075,7 +2869,11 @@ void MainWindow::loadSettings()
 
     m_lastModelDirectory = settings.value(QStringLiteral("paths/lastModelDir")).toString();
     m_currentModelPath = settings.value(QStringLiteral("paths/lastModel")).toString();
+
+    updateEnvironmentControls(m_envManager && m_envManager->isBusy());
+    updateTrainingActions();
 }
+
 
 void MainWindow::saveSettings() const
 {
@@ -2169,6 +2967,61 @@ void MainWindow::openModelFromFile()
         return;
     }
     startImportWorker(selected);
+}
+
+void MainWindow::openSampleModel()
+{
+    const QString samplePath = QDir(QCoreApplication::applicationDirPath())
+                                   .filePath(QStringLiteral("samples/sample_part.stl"));
+    if (!QFileInfo::exists(samplePath))
+    {
+        QMessageBox::warning(this,
+                             tr("Sample Missing"),
+                             tr("Sample part not found:\n%1").arg(QDir::toNativeSeparators(samplePath)));
+        return;
+    }
+
+    logMessage(tr("Loading sample part from %1").arg(QDir::toNativeSeparators(samplePath)));
+    startImportWorker(samplePath);
+}
+
+void MainWindow::generateDemoToolpath()
+{
+    if (!m_toolpathSettings)
+    {
+        return;
+    }
+
+    if (!m_currentModel || !m_currentModel->isValid())
+    {
+        m_generateDemoPending = true;
+        openSampleModel();
+        return;
+    }
+
+    m_generateDemoPending = false;
+
+    tp::UserParams params = m_toolpathSettings->currentParameters();
+    if (params.toolDiameter <= 0.0)
+    {
+        params.toolDiameter = 6.0;
+    }
+    if (params.stepOver <= 0.0)
+    {
+        params.stepOver = 2.0;
+    }
+    if (params.maxDepthPerPass <= 0.0)
+    {
+        params.maxDepthPerPass = 2.0;
+    }
+    if (qFuzzyIsNull(params.rasterAngleDeg))
+    {
+        params.rasterAngleDeg = 45.0;
+    }
+
+    m_toolpathSettings->setParameters(params);
+    logMessage(tr("Generating demo toolpath..."));
+    onToolpathRequested(params);
 }
 
 void MainWindow::saveToolpathToFile()
@@ -2431,6 +3284,11 @@ void MainWindow::updateModelBrowser()
     else
     {
         m_modelBrowser->addItem(tr("No model loaded."));
+    }
+
+    if (m_generateSampleAction)
+    {
+        m_generateSampleAction->setEnabled(static_cast<bool>(m_currentModel));
     }
 }
 
