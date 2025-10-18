@@ -1,0 +1,41 @@
+set(_qt_helper "@QT_WDEPLOYQT_EXECUTABLE@")
+if (NOT EXISTS "${_qt_helper}")
+    message(FATAL_ERROR "windeployqt helper not found at ${_qt_helper}")
+endif()
+
+set(_install_prefix "${CMAKE_INSTALL_PREFIX}")
+if (NOT _install_prefix)
+    set(_install_prefix "@CMAKE_INSTALL_PREFIX@")
+endif()
+
+if (DEFINED ENV{DESTDIR} AND NOT "$ENV{DESTDIR}" STREQUAL "")
+    file(TO_CMAKE_PATH "$ENV{DESTDIR}" _destdir_prefix)
+    set(_install_prefix "${_destdir_prefix}${_install_prefix}")
+endif()
+
+file(TO_CMAKE_PATH "${_install_prefix}/@QT_DEPLOY_INSTALL_BINDIR@" _install_dir)
+file(TO_CMAKE_PATH "${_install_dir}/@QT_DEPLOY_APP_FILENAME@" _exe_path)
+
+file(MAKE_DIRECTORY "${_install_dir}")
+
+set(_config_arg "--release")
+if (DEFINED CMAKE_INSTALL_CONFIG_NAME AND CMAKE_INSTALL_CONFIG_NAME STREQUAL "Debug")
+    set(_config_arg "--debug")
+endif()
+
+file(TO_NATIVE_PATH "${_qt_helper}" _qt_helper_native)
+file(TO_NATIVE_PATH "${_install_dir}" _install_dir_native)
+file(TO_NATIVE_PATH "${_exe_path}" _exe_path_native)
+
+execute_process(
+    COMMAND "${_qt_helper_native}"
+        ${_config_arg}
+        --no-compiler-runtime
+        --dir "${_install_dir_native}"
+        "${_exe_path_native}"
+    RESULT_VARIABLE _qt_deploy_result
+)
+
+if (NOT _qt_deploy_result EQUAL 0)
+    message(FATAL_ERROR "windeployqt failed with exit code ${_qt_deploy_result}")
+endif()

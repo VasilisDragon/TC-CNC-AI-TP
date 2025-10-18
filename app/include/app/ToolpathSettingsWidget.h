@@ -31,7 +31,7 @@ public:
     void setParameters(const tp::UserParams& paramsMm);
     tp::UserParams currentParameters() const;
 
-signals:
+    Q_SIGNALS:
     void generateRequested(const tp::UserParams& settings);
     void toolChanged(const QString& toolId);
     void warningGenerated(const QString& message);
