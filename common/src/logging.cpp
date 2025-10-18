@@ -5,10 +5,10 @@
 
 #include <cstdlib>
 
-Q_LOGGING_CATEGORY(appLog, "AIToolpathGenerator")
-
 namespace common
 {
+
+Q_LOGGING_CATEGORY(appLog, "AIToolpathGenerator")
 
 namespace
 {

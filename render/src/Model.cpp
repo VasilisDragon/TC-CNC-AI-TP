@@ -17,7 +17,7 @@ const QString& Model::name() const
     return m_name;
 }
 
-void Model::setMeshData(std::vector<Vertex> vertices, std::vector<Index> indices)
+void Model::setMeshData(std::vector<Vertex> vertices, std::vector<Model::Index> indices)
 {
     m_vertices = std::move(vertices);
     m_indices = std::move(indices);
@@ -28,7 +28,7 @@ const std::vector<Vertex>& Model::vertices() const
     return m_vertices;
 }
 
-const std::vector<Index>& Model::indices() const
+const std::vector<Model::Index>& Model::indices() const
 {
     return m_indices;
 }
@@ -100,4 +100,3 @@ QByteArray Model::toObjFormat() const
 }
 
 } // namespace render
-

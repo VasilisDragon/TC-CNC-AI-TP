@@ -8,6 +8,10 @@
 
 #include <vector>
 
+#ifdef Index
+#  undef Index
+#endif
+
 namespace render
 {
 
@@ -44,4 +48,3 @@ private:
 };
 
 } // namespace render
-

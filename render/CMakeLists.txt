@@ -26,6 +26,7 @@ target_link_libraries(render
         Qt6::Widgets
         Qt6::OpenGL
         Qt6::OpenGLWidgets
+        glm::glm
         common
 )
 
@@ -38,8 +39,4 @@ qt_add_resources(render "render_resources"
         shaders/polyline.vert
 )
 
-target_compile_definitions(render
-    PUBLIC
-        QT_NO_KEYWORDS
-)
 
