@@ -1,4 +1,4 @@
-﻿# SMOKE_P18 - Waterline Contours
+# SMOKE_P18 - Waterline Contours
 
 1. Load a model with vertical walls (e.g. samples/sample_part.stl).
 2. Choose a finishing tool and set *Strategy* to Waterline (AI will suggest automatically for steep features).

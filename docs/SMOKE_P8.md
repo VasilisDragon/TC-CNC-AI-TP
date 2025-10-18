@@ -1,4 +1,4 @@
-﻿# Smoke Test P8
+# Smoke Test P8
 
 1. Launch the app and load a sizeable mesh via File -> Open Model.... A progress dialog should appear; move other windows or orbit the viewer to confirm the UI stays responsive.
 2. While the import dialog counts up, click Cancel. Verify the dialog closes, the Console logs "Import cancelled.", and the viewer remains responsive.

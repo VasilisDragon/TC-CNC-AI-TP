@@ -1,4 +1,4 @@
-﻿# DATASET_V2 - Synthetic Label Generation
+# DATASET_V2 - Synthetic Label Generation
 
 The second revision of the synthetic machining dataset introduces geometry that
 better reflects real setup challenges and labels that are derived from numeric

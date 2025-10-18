@@ -1,4 +1,4 @@
-﻿# SMOKE_P17 - HeightField Raster
+# SMOKE_P17 - HeightField Raster
 
 1. Launch the app and open a model with visible relief (e.g. samples/sample_part.stl).
 2. In **Toolpath Settings**:

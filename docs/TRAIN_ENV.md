@@ -1,4 +1,4 @@
-﻿# Training Environment
+# Training Environment
 
 The Training Environment manager prepares a self-contained Python stack that mirrors the runtime requirements for model training. Everything is stored in `runtime/` next to the application and can be regenerated at any time.
 

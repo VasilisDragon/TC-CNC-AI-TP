@@ -1,4 +1,4 @@
-﻿# Training GUI Workflow
+# Training GUI Workflow
 
 > _Screenshots marked `TODO` are placeholders. Capture them from the running application after building the feature._
 
@@ -6,7 +6,7 @@
 
 ## Overview
 
-The CNC Toolpath Companion introduces a full graphical workflow for model lifecycle management. The new flow spans synthetic dataset creation, initial training, fine-tuning, environment provisioning, and hot swapping the active inference model—no command-line gymnastics required (unless you’re into that aesthetic).
+The CNC Toolpath Companion introduces a full graphical workflow for model lifecycle management. The new flow spans synthetic dataset creation, initial training, fine-tuning, environment provisioning, and hot swapping the active inference model-no command-line gymnastics required (unless you're into that aesthetic).
 
 Key components:
 
@@ -18,7 +18,7 @@ Key components:
 
 ## Prerequisites
 
-1. Prepare the embedded runtime through **Training → Prepare Environment**. This drives `train::EnvManager`, downloads embedded Python, verifies the checksum, and hydrates a virtual environment. Cancel actually cancels—because forcing a broken download to finish is peak chaos.
+1. Prepare the embedded runtime through **Training -> Prepare Environment**. This drives `train::EnvManager`, downloads embedded Python, verifies the checksum, and hydrates a virtual environment. Cancel actually cancels-because forcing a broken download to finish is peak chaos.
 2. Confirm the packages in `train/requirements.txt` are installed. The Training Manager will double-check and complain loudly if anything is missing.
 3. Models live under `<install-root>/models`; datasets default to `<install-root>/datasets`. The Jobs dock and AI model combo refresh automatically when new artefacts appear, so keep those paths writable.
 
@@ -29,12 +29,12 @@ Key components:
 The **Training Environment** dock (created in `MainWindow::createDockWidgets`) is home base for `train::EnvManager`:
 
 - **Prepare Environment** kicks off the embedded Python bootstrap, progress bar, and log stream. Expect timestamps, SHA-256 validation, and the occasional spicy warning if your disk permissions are sus.
-- **Cancel** stops the active operation and terminates any `QProcess` child. No more waiting out a hung unzip like it’s character building.
-- **CPU-only** toggle persists via `training/cpuOnly`. When enabled, `EnvManager` will skip GPU providers and the New Model wizard hides the “Auto (GPU when available)” option.
-- **GPU summary** reports `nvidia-smi` output (when available). If the label says “GPU: Not detected”, the training dialogs will nudge users toward CPU training so nobody hallucinated CUDA support.
-- **Log panel** mirrors the console output and keeps the newest lines in view. It’s the fastest way to catch pip output or download failures without digging through temp folders.
+- **Cancel** stops the active operation and terminates any `QProcess` child. No more waiting out a hung unzip like it's character building.
+- **CPU-only** toggle persists via `training/cpuOnly`. When enabled, `EnvManager` will skip GPU providers and the New Model wizard hides the "Auto (GPU when available)" option.
+- **GPU summary** reports `nvidia-smi` output (when available). If the label says "GPU: Not detected", the training dialogs will nudge users toward CPU training so nobody hallucinated CUDA support.
+- **Log panel** mirrors the console output and keeps the newest lines in view. It's the fastest way to catch pip output or download failures without digging through temp folders.
 
-All environment state (ready flag, GPU summary, CPU-only preference) is cached via `QSettings` and reapplied on the next launch, so the UI doesn’t make you relive setup every morning.
+All environment state (ready flag, GPU summary, CPU-only preference) is cached via `QSettings` and reapplied on the next launch, so the UI doesn't make you relive setup every morning.
 
 ## Training Menu
 
@@ -48,7 +48,7 @@ All environment state (ready flag, GPU summary, CPU-only preference) is cached v
 | **Open Models Folder**           | Opens `TrainingManager::modelsRoot()` in the OS explorer                  | `MainWindow::openModelsFolder`           |
 | **Open Datasets Folder**         | Opens `TrainingManager::datasetsRoot()`                                   | `MainWindow::openDatasetsFolder`         |
 
-Actions stay disabled until the environment is marked ready (`training/envReady` via `EnvManager::persistStatus`), preventing accidental execution. If the user toggles “CPU-only” in the environment dock, the New Model wizard will automatically hide the GPU option—no more pretending your laptop 3050 is a data center card.
+Actions stay disabled until the environment is marked ready (`training/envReady` via `EnvManager::persistStatus`), preventing accidental execution. If the user toggles "CPU-only" in the environment dock, the New Model wizard will automatically hide the GPU option-no more pretending your laptop 3050 is a data center card.
 
 ![TODO - Training Menu Callouts](images/training_menu_callouts.png)
 
@@ -85,7 +85,7 @@ The Training Manager forwards these parameters to `train/generate_synthetic.py` 
   - `TrainingManager::jobAdded` / `TrainingManager::jobUpdated` for UI state.
   - `TrainingManager::jobLog` to stream stdout/stderr into a persistent log buffer.
   - `TrainingManager::modelRegistered` to refresh the AI roster and hot-swap the active model when new artefacts land in `models/`.
-- Selecting a job refreshes the lower log pane with the accumulated output and updates the summary banner. It’s like doomscrolling, but for gradient descent.
+- Selecting a job refreshes the lower log pane with the accumulated output and updates the summary banner. It's like doomscrolling, but for gradient descent.
 
 Progress and ETA are computed in `TrainingManager` (see `parseOutput` + `refreshEta`) and mirrored in UI via `MainWindow::jobEtaLabel`.
 

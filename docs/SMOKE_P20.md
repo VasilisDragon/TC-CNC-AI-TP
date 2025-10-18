@@ -1,4 +1,4 @@
-﻿# SMOKE_P20 - Feature Vector Preview
+# SMOKE_P20 - Feature Vector Preview
 
 ## Preconditions
 - Build with Torch/ONNX support enabled.

@@ -1,4 +1,4 @@
-﻿# SMOKE_P19 " Multi'pass Scheduler
+# SMOKE_P19 " Multi'pass Scheduler
 
 ## Setup
 - Launch the CNCTC desktop app with any valid 3D model available (the bundled sample is fine).

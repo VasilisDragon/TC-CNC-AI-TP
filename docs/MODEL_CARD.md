@@ -1,4 +1,4 @@
-﻿# TorchAI Model Card
+# TorchAI Model Card
 
 ## Overview
 TorchAI wraps TorchScript modules so the CNC toolpath planner can predict machining strategy parameters from geometric features. When LibTorch is available the engine loads a scripted `.pt` module at startup, evaluates it on demand, and feeds the predicted strategy back into the placeholder toolpath generator. If LibTorch is absent the code compiles in a stub mode that always returns safe defaults, keeping the public ABI intact.

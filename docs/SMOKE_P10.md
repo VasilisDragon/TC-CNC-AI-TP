@@ -1,4 +1,4 @@
-﻿# Smoke Test P10
+# Smoke Test P10
 
 1. Download a LibTorch build (CPU or CUDA). Point `TORCH_DIR` at the extracted directory and configure the project with `cmake -S . -B build -DWITH_TORCH=ON`. Confirm CMake reports that LibTorch was found.
 2. Build and start the application. Import any mesh so a `render::Model` is active.

@@ -4,7 +4,7 @@ This page collects the most common build-time issues we have seen on a fresh Win
 
 ## Toolchain Setup
 - **Visual Studio 2022**: install the "Desktop development with C++" workload, including the latest MSVC toolset and Windows 11 SDK. Always open the *x64 Native Tools Command Prompt* before running CMake/Ninja.
-- **CMake & Ninja**: install the latest releases from [cmake.org](https://cmake.org) and [ninja-build.org](https://ninja-build.org) and add both to `PATH`. The project's presets assume Ninja.
+- **CMake + MSVC toolchain**: install the latest CMake from [cmake.org](https://cmake.org) and the Visual Studio 2022 Build Tools (C++ workload). The default presets target `vs2022-x64`, but you can add a Ninja preset if you keep that workflow.
 - **Qt 6.5+**: install the MSVC 64-bit binary build. Set `Qt6_DIR` (or `Qt6Core_DIR`) to the `lib/cmake/Qt6` directory so that `find_package(Qt6 ...)` succeeds.
 
 ## Optional Backends
@@ -26,6 +26,6 @@ This page collects the most common build-time issues we have seen on a fresh Win
 
 ## Quick Checklist
 1. Run `scripts/verify_env.ps1` - it checks CMake, Ninja, `cl.exe`, Qt and optional SDK hints.
-2. Use `cmake --preset ninja-release` (or `ninja-debug`) to configure.
-3. Build with `cmake --build --preset ninja-release`.
-4. Launch the desktop app from `out/build/ninja-release/app/AIToolpathGenerator.exe`.
+2. Use `cmake --preset vs2022-x64` (or your custom Ninja preset) to configure.
+3. Build with `cmake --build --preset build-vs-debug` (or the release variant you need).
+4. Launch the desktop app from `build/vs2022/app/Release/AIToolpathGenerator.exe`.

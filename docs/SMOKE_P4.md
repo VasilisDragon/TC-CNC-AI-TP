@@ -1,4 +1,4 @@
-﻿# Smoke Test P4
+# Smoke Test P4
 
 1. **Configure & build**
    - `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release`

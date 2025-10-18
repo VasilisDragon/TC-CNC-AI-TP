@@ -1,4 +1,4 @@
-﻿# Smoke Test P13
+# Smoke Test P13
 
 1. Load a model and generate a toolpath (with or without OCL). Wait until the console reports the strategy and the toolpath appears in the viewer.
 2. In the **Simulation** toolbar at the bottom, click **Play**. A small green sphere should travel along the toolpath, following cut moves at the configured feed rate. Rapid moves display in yellow.

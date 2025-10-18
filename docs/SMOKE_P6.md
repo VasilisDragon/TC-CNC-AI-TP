@@ -1,4 +1,4 @@
-﻿# Smoke Test P6
+# Smoke Test P6
 
 1. Launch the app and confirm the default units (mm) appear in the toolpath settings spin boxes.
 2. Open View -> Units -> Inches and verify every length/feed spin box updates to "in" / "in/min" while values convert (e.g., 6 mm ~ 0.236 in).

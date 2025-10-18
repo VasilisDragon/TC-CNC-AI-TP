@@ -1,4 +1,4 @@
-﻿# SMOKE_P16 - Stock & Machine
+# SMOKE_P16 - Stock & Machine
 
 1. Launch the app and load any sample model (e.g. samples/sample_part.stl).
 2. In **Stock & Machine**:
