@@ -264,6 +264,8 @@ set(_third_party_runtime_dlls
     "harfbuzz.dll"
     "kubazip.dll"
     "libpng16.dll"
+    "libcrypto-3-x64.dll"
+    "libssl-3-x64.dll"
     "minizip.dll"
     "pcre2-16.dll"
     "poly2tri.dll"
