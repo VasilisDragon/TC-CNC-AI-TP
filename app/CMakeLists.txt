@@ -167,6 +167,13 @@ install(TARGETS app
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+install(FILES
+    $<TARGET_RUNTIME_DLLS:app>
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT Runtime
+    OPTIONAL
+)
+
 # Ensure Qt runtime and plugins are copied next to the executable
 if (app_deploy_script)
     install(SCRIPT ${app_deploy_script})
