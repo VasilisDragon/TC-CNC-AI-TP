@@ -8,8 +8,8 @@
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QString>
 #include <QtGui/QMatrix4x4>
-#include <QtGui/QOpenGLFunctions_3_3_Core>
-#include <QtOpenGL/QOpenGLWidget>
+#include <QtOpenGL/QOpenGLFunctions_3_3_Core>
+#include <QtOpenGLWidgets/QOpenGLWidget>
 
 #include <memory>
 #include <vector>
@@ -47,7 +47,7 @@ public:
     void resetCamera();
     void setViewPreset(ViewPreset preset);
 
-signals:
+    Q_SIGNALS:
     void rendererInfoChanged(const QString& vendor, const QString& renderer, const QString& version);
     void frameStatsUpdated(float fps);
     void cameraChanged();

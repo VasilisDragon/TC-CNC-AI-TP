@@ -6,6 +6,7 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace render
 {
@@ -53,7 +54,24 @@ public:
                       std::string* bannerMessage = nullptr) const;
 
 private:
-    struct PassProfile;
+    struct PassProfile
+    {
+        enum class Kind
+        {
+            Rough,
+            Finish
+        };
+
+        Kind kind{Kind::Finish};
+        double stepOver{0.0};
+        double maxStepDown{0.0};
+        double allowance{0.0};
+    };
+
+    static const char* passLabel(const PassProfile& profile);
+    static std::string makePassLog(const PassProfile& profile, const std::string& message);
+    static std::vector<PassProfile> buildPassPlan(const UserParams& params,
+                                                  const ai::StrategyDecision& decision);
 
     Toolpath generateRasterTopography(const render::Model& model,
                                       const UserParams& params,

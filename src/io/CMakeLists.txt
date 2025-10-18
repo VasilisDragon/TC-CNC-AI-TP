@@ -17,8 +17,3 @@ target_link_libraries(io
         render
         common
 )
-
-target_compile_definitions(io
-    PUBLIC
-        QT_NO_KEYWORDS
-)

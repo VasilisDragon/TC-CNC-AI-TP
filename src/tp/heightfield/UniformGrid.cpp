@@ -18,6 +18,12 @@ namespace tp::heightfield
 namespace
 {
 constexpr double kEpsilon = 1e-9;
+template <typename Vec>
+inline auto lengthSquared(const Vec& v) -> decltype(glm::dot(v, v))
+{
+    return glm::dot(v, v);
+}
+
 
 [[nodiscard]] inline int clampIndex(int value, int max)
 {
@@ -70,9 +76,9 @@ UniformGrid::Triangle UniformGrid::makeTriangle(const render::Model& model, std:
     tri.maxZ = std::max({tri.v0.z, tri.v1.z, tri.v2.z});
     tri.minZ = std::min({tri.v0.z, tri.v1.z, tri.v2.z});
 
-    const double r0 = glm::length2(tri.v0 - tri.centroid);
-    const double r1 = glm::length2(tri.v1 - tri.centroid);
-    const double r2 = glm::length2(tri.v2 - tri.centroid);
+    const double r0 = lengthSquared(tri.v0 - tri.centroid);
+    const double r1 = lengthSquared(tri.v1 - tri.centroid);
+    const double r2 = lengthSquared(tri.v2 - tri.centroid);
     tri.boundingRadiusSq = std::max({r0, r1, r2});
     return tri;
 }

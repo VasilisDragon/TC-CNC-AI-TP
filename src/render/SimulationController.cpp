@@ -52,7 +52,7 @@ void SimulationController::play()
         m_currentTime = 0.0;
         m_currentSegment = 0;
         emitPosition(true);
-        emit progressChanged(progress());
+        Q_EMIT progressChanged(progress());
     }
 
     if (m_state == State::Playing)
@@ -63,7 +63,7 @@ void SimulationController::play()
     m_state = State::Playing;
     m_elapsed.restart();
     m_timer.start();
-    emit stateChanged(m_state);
+    Q_EMIT stateChanged(m_state);
 }
 
 void SimulationController::pause()
@@ -72,7 +72,7 @@ void SimulationController::pause()
     {
         m_timer.stop();
         m_state = State::Paused;
-        emit stateChanged(m_state);
+        Q_EMIT stateChanged(m_state);
     }
 }
 
@@ -81,7 +81,7 @@ void SimulationController::stop()
     if (m_state == State::Stopped && m_currentTime == 0.0)
     {
         emitPosition(hasPath());
-        emit progressChanged(0.0);
+        Q_EMIT progressChanged(0.0);
         return;
     }
 
@@ -90,8 +90,8 @@ void SimulationController::stop()
     m_currentTime = 0.0;
     m_currentSegment = 0;
     emitPosition(hasPath());
-    emit progressChanged(0.0);
-    emit stateChanged(m_state);
+    Q_EMIT progressChanged(0.0);
+    Q_EMIT stateChanged(m_state);
 }
 
 void SimulationController::setSpeedMultiplier(double multiplier)
@@ -111,7 +111,7 @@ void SimulationController::setProgress(double normalized)
     m_currentTime = clamped * m_totalDuration;
     updateSegmentFromTime();
     emitPosition(true);
-    emit progressChanged(progress());
+    Q_EMIT progressChanged(progress());
 }
 
 double SimulationController::progress() const noexcept
@@ -139,14 +139,14 @@ void SimulationController::onTick()
         m_currentTime = m_totalDuration;
         updateSegmentFromTime();
         emitPosition(true);
-        emit progressChanged(progress());
+        Q_EMIT progressChanged(progress());
         stop();
         return;
     }
 
     updateSegmentFromTime();
     emitPosition(true);
-    emit progressChanged(progress());
+    Q_EMIT progressChanged(progress());
 }
 
 void SimulationController::rebuildSegments()
@@ -158,7 +158,7 @@ void SimulationController::rebuildSegments()
 
     if (!m_toolpath || m_toolpath->empty())
     {
-        emit progressChanged(0.0);
+        Q_EMIT progressChanged(0.0);
         emitPosition(false);
         return;
     }
@@ -214,12 +214,12 @@ void SimulationController::rebuildSegments()
     if (m_totalDuration <= std::numeric_limits<double>::epsilon())
     {
         m_segments.clear();
-        emit progressChanged(0.0);
+        Q_EMIT progressChanged(0.0);
         emitPosition(false);
         return;
     }
 
-    emit progressChanged(0.0);
+    Q_EMIT progressChanged(0.0);
     emitPosition(true);
 }
 
@@ -253,7 +253,7 @@ void SimulationController::emitPosition(bool visible)
 {
     if (m_segments.empty() || !visible)
     {
-        emit positionChanged(QVector3D(), false, false, static_cast<float>(m_toolDiameter * 0.5));
+        Q_EMIT positionChanged(QVector3D(), false, false, static_cast<float>(m_toolDiameter * 0.5));
         return;
     }
 
@@ -263,7 +263,7 @@ void SimulationController::emitPosition(bool visible)
     const double t = segment.duration > 0.0 ? (localTime / segment.duration) : 0.0;
 
     const QVector3D position = segment.start + static_cast<float>(t) * (segment.end - segment.start);
-    emit positionChanged(position, segment.rapid, true, static_cast<float>(currentRadius()));
+    Q_EMIT positionChanged(position, segment.rapid, true, static_cast<float>(currentRadius()));
 }
 
 double SimulationController::currentRadius() const noexcept

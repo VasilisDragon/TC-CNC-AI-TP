@@ -44,12 +44,12 @@ public:
     [[nodiscard]] State state() const noexcept { return m_state; }
     [[nodiscard]] bool hasPath() const noexcept { return !m_segments.empty(); }
 
-signals:
+Q_SIGNALS:
     void positionChanged(const QVector3D& position, bool rapid, bool visible, float radius);
     void progressChanged(double normalized);
     void stateChanged(render::SimulationController::State state);
 
-private slots:
+private Q_SLOTS:
     void onTick();
 
 private:

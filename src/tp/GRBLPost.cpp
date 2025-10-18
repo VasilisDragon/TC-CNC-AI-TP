@@ -32,7 +32,7 @@ std::string GRBLPost::name() const
     return "GRBL";
 }
 
-std::string GRBLPost::emit(const tp::Toolpath& toolpath,
+std::string GRBLPost::generate(const tp::Toolpath& toolpath,
                            common::Unit units,
                            const tp::UserParams& params)
 {

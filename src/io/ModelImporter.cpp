@@ -117,7 +117,14 @@ bool ModelImporter::load(const std::filesystem::path& file,
     importer.SetPropertyInteger(AI_CONFIG_PP_SBP_REMOVE, aiPrimitiveType_POINT | aiPrimitiveType_LINE);
     importer.SetPropertyBool(AI_CONFIG_PP_PTV_KEEP_HIERARCHY, false);
 
-    const std::string utf8Path = file.u8string();
+    const auto utf8Raw = file.u8string();
+    std::string utf8Path;
+    utf8Path.reserve(utf8Raw.size());
+    for (char8_t ch : utf8Raw)
+    {
+        utf8Path.push_back(static_cast<char>(ch));
+    }
+
     const aiScene* scene = importer.ReadFile(utf8Path.c_str(), kPostProcessFlags);
     if (!scene || !scene->HasMeshes())
     {
@@ -195,11 +202,6 @@ bool ModelImporter::load(const std::filesystem::path& file,
     outModel.setName(QString::fromStdString(file.filename().string()));
 #endif
     outModel.setMeshData(std::move(vertices), std::move(indices));
-
-    if (const char* warnings = importer.GetWarnString(); warnings && warnings[0] != '\0')
-    {
-        error = warnings;
-    }
 
     return true;
 }

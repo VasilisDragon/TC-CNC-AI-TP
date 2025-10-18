@@ -4,6 +4,7 @@
 #include "ai/IPathAI.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -41,8 +42,8 @@ private:
     std::size_t parseExpectedInputSizeFromArtifacts() const;
     std::vector<float> alignFeatureVector(std::vector<float>&&) const;
     void logFeaturePreview(const std::vector<float>& features) const;
-    std::vector<float> buildFeatures(const render::Model& model,
-                                     const tp::UserParams& params) const;
+    std::optional<std::vector<float>> buildFeatures(const render::Model& model,
+                                                    const tp::UserParams& params) const;
 
     std::filesystem::path m_modelPath;
     bool m_loaded{false};

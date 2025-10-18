@@ -19,13 +19,14 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
 
-find_package(Qt6 6.5 COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets REQUIRED)
+find_package(Qt6 6.5 COMPONENTS Core Gui Widgets Network OpenGL OpenGLWidgets REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 
 option(WITH_TORCH "Enable TorchScript inference via LibTorch" OFF)
 option(WITH_ONNXRUNTIME "Enable ONNX Runtime inference" OFF)
 option(WITH_OCL "Enable OpenCAMLib toolpath generation" OFF)
+option(WITH_EMBEDDED_TESTS "Embed diagnostics tests in the desktop application" OFF)
 
 set(AI_TORCH_ENABLED OFF CACHE INTERNAL "Enable Torch integration" FORCE)
 if (WITH_TORCH)
@@ -130,6 +131,9 @@ add_subdirectory(render)
 add_subdirectory(src/io)
 add_subdirectory(src/ai)
 add_subdirectory(src/tp)
+if (WITH_EMBEDDED_TESTS)
+    add_subdirectory(src/tests_core)
+endif()
 add_subdirectory(app)
 
 if (AI_ONNX_ENABLED)
@@ -152,10 +156,12 @@ include(CTest)
 if (BUILD_TESTING)
     add_executable(basic_sanity_tests
         tests/basic_sanity.cpp
+        src/tests_core/basic_toolpath_tests.cpp
     )
     target_include_directories(basic_sanity_tests
         PRIVATE
             ${CMAKE_SOURCE_DIR}/tests
+            ${CMAKE_SOURCE_DIR}/src/tests_core
     )
     target_link_libraries(basic_sanity_tests
         PRIVATE
@@ -184,13 +190,30 @@ if (BUILD_TESTING)
             CNCTC_SOURCE_DIR="${CNCTC_SOURCE_DIR_ESCAPED}"
     )
 
+    add_executable(feature_ai_tests
+        tests/feature_ai_doctest.cpp
+    )
+    target_include_directories(feature_ai_tests
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/tests
+    )
+    target_link_libraries(feature_ai_tests
+        PRIVATE
+            ai
+            tp
+            render
+            common
+    )
+
     add_test(NAME basic_sanity COMMAND basic_sanity_tests)
     add_test(NAME path_safety COMMAND path_safety_tests)
     add_test(NAME headless_pipeline COMMAND headless_pipeline_tests)
+    add_test(NAME feature_ai COMMAND feature_ai_tests)
 
     set_tests_properties(path_safety PROPERTIES LABELS fast)
     set_tests_properties(headless_pipeline PROPERTIES LABELS fast)
     set_tests_properties(basic_sanity PROPERTIES LABELS fast)
+    set_tests_properties(feature_ai PROPERTIES LABELS fast)
 
     if (TARGET onnx_ai_smoke)
         add_test(NAME onnx_ai_smoke_test COMMAND onnx_ai_smoke)

@@ -4,7 +4,8 @@
 #include "common/Units.h"
 #include "tp/Toolpath.h"
 #include "tp/ToolpathGenerator.h"
-#include "render/SimulationController.h"\r\n#include "train/TrainingManager.h"
+#include "render/SimulationController.h"
+#include "train/TrainingManager.h"
 
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QHash>
@@ -286,6 +287,9 @@ private:
     QAction* m_trainingFineTuneAction{nullptr};
     QAction* m_trainingOpenModelsAction{nullptr};
     QAction* m_trainingOpenDatasetsAction{nullptr};
+#if WITH_EMBEDDED_TESTS
+    QAction* m_diagnosticsAction{nullptr};
+#endif
     QDockWidget* m_jobsDock{nullptr};
     QListWidget* m_jobsList{nullptr};
     QPlainTextEdit* m_jobLog{nullptr};
@@ -300,6 +304,7 @@ private:
         QLabel* status{nullptr};
         QLabel* eta{nullptr};
         QPushButton* cancel{nullptr};
+        train::TrainingManager::JobStatus snapshot;
     };
     QHash<QUuid, JobWidgets> m_jobWidgets;
     QHash<QUuid, QStringList> m_jobLogs;

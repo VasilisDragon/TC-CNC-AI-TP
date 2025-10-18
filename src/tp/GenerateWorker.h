@@ -34,7 +34,7 @@ public:
 
     void requestCancel();
 
-signals:
+    Q_SIGNALS:
     void progress(int value);
     void finished(std::shared_ptr<tp::Toolpath> toolpath, ai::StrategyDecision decision);
     void error(const QString& message);

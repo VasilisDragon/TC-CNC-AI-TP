@@ -24,7 +24,7 @@ public:
 
     void requestCancel();
 
-signals:
+    Q_SIGNALS:
     void progress(int value);
     void finished(std::shared_ptr<render::Model> model);
     void error(const QString& message);

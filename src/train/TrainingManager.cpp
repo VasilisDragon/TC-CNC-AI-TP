@@ -22,6 +22,9 @@
 #include <algorithm>
 
 #ifdef Q_OS_WIN
+#    ifndef NOMINMAX
+#        define NOMINMAX
+#    endif
 #    include <windows.h>
 #endif
 
@@ -919,3 +922,4 @@ void TrainingManager::appendLog(Job& job, const QString& text)
 }
 
 } // namespace train
+

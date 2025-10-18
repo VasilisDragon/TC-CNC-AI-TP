@@ -2,11 +2,11 @@
 
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QVector3D>
-#include <QtGui/QOpenGLFunctions_3_3_Core>
+#include <QtOpenGL/QOpenGLFunctions_3_3_Core>
 
-#include <QtGui/QOpenGLBuffer>
-#include <QtGui/QOpenGLVertexArrayObject>
-#include <QtGui/QOpenGLShaderProgram>
+#include <QtOpenGL/QOpenGLBuffer>
+#include <QtOpenGL/QOpenGLVertexArrayObject>
+#include <QtOpenGL/QOpenGLShaderProgram>
 
 #include <memory>
 #include <vector>

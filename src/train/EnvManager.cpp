@@ -5,6 +5,8 @@
 #include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QByteArray>
 #include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSettings>
@@ -34,6 +36,7 @@ namespace
 {
 constexpr auto kPythonVersion = "3.11.5";
 constexpr auto kPythonEmbedUrl = "https://www.python.org/ftp/python/3.11.5/python-3.11.5-embed-amd64.zip";
+constexpr auto kPythonEmbedSha256 = "d82391a2e51c3684987c61f6b7cedbff3ce9fbe2e39cd948d32b0da866544b17";
 
 QString runtimeRootDefault()
 {
@@ -275,6 +278,11 @@ bool EnvManager::detectPython(QString& errorMessage)
 
 bool EnvManager::downloadEmbeddedPython(QString& errorMessage)
 {
+#ifndef Q_OS_WIN
+    appendLog(timestamped(tr("Embedded Python bootstrap is only available on Windows.")));
+    errorMessage = tr("Install Python 3.11 manually and point CNCTC at that interpreter.");
+    return false;
+#else
     if (m_cancelRequested.load())
     {
         return false;
@@ -378,6 +386,12 @@ bool EnvManager::downloadEmbeddedPython(QString& errorMessage)
 
     reply->deleteLater();
 
+    if (!verifyEmbeddedPythonArchive(archivePath, errorMessage))
+    {
+        cleanupPartial();
+        return false;
+    }
+
     if (m_cancelRequested.load())
     {
         cleanupPartial();
@@ -401,10 +415,62 @@ bool EnvManager::downloadEmbeddedPython(QString& errorMessage)
     m_pythonExecutable = pythonDir.filePath(QStringLiteral("python.exe"));
     m_pythonHome = pythonDir.absolutePath();
     return true;
+#endif
+}
+
+bool EnvManager::verifyEmbeddedPythonArchive(const QString& archivePath, QString& errorMessage)
+{
+    QFile file(archivePath);
+    if (!file.exists())
+    {
+        errorMessage = tr("Downloaded Python archive missing: %1").arg(archivePath);
+        return false;
+    }
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        errorMessage = tr("Unable to open Python archive for hashing: %1").arg(file.errorString());
+        return false;
+    }
+
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    while (!file.atEnd())
+    {
+        const QByteArray chunk = file.read(1 << 15);
+        if (chunk.isEmpty() && file.error() != QFile::NoError)
+        {
+            errorMessage = tr("Failed while reading Python archive for hashing.");
+            return false;
+        }
+        hash.addData(chunk);
+    }
+
+    const QByteArray actual = hash.result().toHex();
+    const QByteArray expected = QByteArrayLiteral(kPythonEmbedSha256);
+
+    if (expected.isEmpty())
+    {
+        return true;
+    }
+
+    if (!actual.isEmpty() && actual.toLower() == expected.toLower())
+    {
+        appendLog(timestamped(tr("Embedded Python archive hash verified.")));
+        return true;
+    }
+
+    errorMessage = tr("Embedded Python hash mismatch. Expected %1 but received %2.")
+                       .arg(QString::fromLatin1(expected))
+                       .arg(QString::fromLatin1(actual));
+    return false;
 }
 
 bool EnvManager::extractEmbeddedPython(const QString& archivePath, QString& errorMessage)
 {
+#ifndef Q_OS_WIN
+    Q_UNUSED(archivePath);
+    errorMessage = tr("Embedded Python extraction is unsupported on this platform.");
+    return false;
+#else
     if (m_cancelRequested.load())
     {
         return false;
@@ -466,6 +532,7 @@ bool EnvManager::extractEmbeddedPython(const QString& archivePath, QString& erro
 
     QFile::remove(archivePath);
     return true;
+#endif
 }
 
 bool EnvManager::ensureSiteEnabled(QString& errorMessage) const

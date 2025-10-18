@@ -1,6 +1,7 @@
 #include "tp/ocl/OclAdapter.h"
 
 #include "render/Model.h"
+#include "tp/ToolpathGenerator.h"
 #include "tp/waterline/ZSlicer.h"
 
 #include <algorithm>
@@ -21,6 +22,12 @@ namespace tp
 
 namespace
 {
+
+template <typename Vec>
+inline auto lengthSquared(const Vec& v) -> decltype(glm::dot(v, v))
+{
+    return glm::dot(v, v);
+}
 
 float clampStepOver(double stepOverMm)
 {
@@ -294,7 +301,7 @@ bool OclAdapter::rasterDropCutter(const render::Model& model,
         span.edge0 = b - span.a;
         span.edge1 = c - span.a;
         span.normal = glm::cross(span.edge0, span.edge1);
-        if (glm::length2(span.normal) < kEps)
+        if (lengthSquared(span.normal) < kEps)
         {
             continue;
         }

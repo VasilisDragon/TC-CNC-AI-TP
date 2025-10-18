@@ -13,7 +13,7 @@ public:
     GRBLPost() = default;
 
     std::string name() const override;
-    std::string emit(const tp::Toolpath& toolpath,
+    std::string generate(const tp::Toolpath& toolpath,
                      common::Unit units,
                      const tp::UserParams& params) override;
 };

@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,8 +43,8 @@ private:
     std::size_t resolveExpectedInputSize() const;
     std::vector<float> alignFeatureVector(std::vector<float>&&) const;
     void logFeaturePreview(const std::vector<float>& features) const;
-    std::vector<float> buildFeatures(const render::Model& model,
-                                     const tp::UserParams& params) const;
+    std::optional<std::vector<float>> buildFeatures(const render::Model& model,
+                                                    const tp::UserParams& params) const;
 
     struct OutputNames
     {

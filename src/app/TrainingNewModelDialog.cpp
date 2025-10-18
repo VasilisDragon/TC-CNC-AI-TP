@@ -3,10 +3,11 @@
 #include "ai/ModelManager.h"
 #include "ui_TrainingNewModelDialog.h"
 
-#include <QtWidgets/QDialogButtonBox>
-#include <QtWidgets/QFileDialog>
-#include <QtWidgets/QLineEdit>
-#include <QtWidgets/QToolButton>
+#include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QLineEdit>
+#include <QToolButton>
+#include <QPushButton>
 
 #include <QtCore/QDateTime>
 #include <QtCore/QFileInfo>

@@ -28,7 +28,7 @@ public:
     void setTestEnabled(bool enabled);
     void setLastTestResult(const QString& text);
 
-signals:
+    Q_SIGNALS:
     void testRequested();
     void forceCpuChanged(bool checked);
 

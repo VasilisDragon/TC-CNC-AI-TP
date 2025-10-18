@@ -24,7 +24,7 @@ bool GCodeExporter::exportToFile(const tp::Toolpath& toolpath,
         return false;
     }
 
-    const std::string data = post.emit(toolpath, units, params);
+    const std::string data = post.generate(toolpath, units, params);
     if (file.write(data.c_str(), static_cast<qint64>(data.size())) == -1)
     {
         if (error)

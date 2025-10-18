@@ -1,57 +1,41 @@
 {
-  "version": 3,
-  "cmakeMinimumRequired": {
-    "major": 3,
-    "minor": 21,
-    "patch": 0
-  },
+  "version": 5,
   "configurePresets": [
     {
-      "name": "ninja-debug",
-      "displayName": "Ninja Debug",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/build/ninja-debug",
-      "installDir": "${sourceDir}/out/install/ninja-debug",
+      "name": "vs2022-x64",
+      "displayName": "Visual Studio 2022 (x64) + vcpkg",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64"
+      },
+      "binaryDir": "${sourceDir}/build/vs2022",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "BUILD_TESTING": "ON"
-      }
-    },
-    {
-      "name": "ninja-release",
-      "displayName": "Ninja Release",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/build/ninja-release",
-      "installDir": "${sourceDir}/out/install/ninja-release",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_TOOLCHAIN_FILE": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
         "BUILD_TESTING": "ON"
       }
     }
   ],
   "buildPresets": [
     {
-      "name": "ninja-debug",
-      "configurePreset": "ninja-debug"
+      "name": "build-vs-debug",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug"
     },
     {
-      "name": "ninja-release",
-      "configurePreset": "ninja-release"
+      "name": "build-vs-release",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Release"
     }
   ],
   "testPresets": [
     {
-      "name": "ninja-debug",
-      "configurePreset": "ninja-debug",
+      "name": "test-vs-debug",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug",
       "output": {
-        "shortProgress": true
-      }
-    },
-    {
-      "name": "ninja-release",
-      "configurePreset": "ninja-release",
-      "output": {
-        "shortProgress": true
+        "outputOnFailure": true
       }
     }
   ]

@@ -121,12 +121,6 @@
          <property name="spacing">
           <number>6</number>
          </property>
-         <property name="contentsMargins">
-          <left>0</left>
-          <top>0</top>
-          <right>0</right>
-          <bottom>0</bottom>
-         </property>
          <item>
           <widget class="QLineEdit" name="datasetLineEdit">
            <property name="placeholderText">

@@ -1,13 +1,14 @@
 {
   "name": "cnctc",
   "version-string": "0.1.0",
-  "dependencies": [],
-  "features": {
-    "onnxruntime": {
-      "description": "Enable ONNX Runtime inference backend.",
-      "dependencies": [
-        "onnxruntime"
-      ]
-    }
-  }
+  "builtin-baseline": "8e16865b45bb8a8238cc2f742dfaa94dc67af64a",
+  "dependencies": [
+    {
+      "name": "qtbase",
+      "default-features": true
+    },
+    "qttools",
+    "assimp",
+    "glm"
+  ]
 }

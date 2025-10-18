@@ -5,14 +5,14 @@
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
+#include <QtCore/QProcess>
 #include <QtCore/QQueue>
 #include <QtCore/QString>
 #include <QtCore/QUuid>
 
 #include <memory>
 #include <variant>
-
-class QProcess;
+#include <vector>
 
 namespace ai
 {
@@ -95,7 +95,7 @@ public:
     [[nodiscard]] QString datasetsRoot() const;
     [[nodiscard]] QString modelsRoot() const;
 
-signals:
+    Q_SIGNALS:
     void jobAdded(const train::TrainingManager::JobStatus& status);
     void jobUpdated(const train::TrainingManager::JobStatus& status);
     void jobRemoved(const QUuid& id);
@@ -181,7 +181,7 @@ private:
     [[nodiscard]] QString ensureDirectory(const QString& path) const;
     [[nodiscard]] QString sanitizeName(const QString& name) const;
 
-    QList<std::unique_ptr<Job>> m_jobs;
+    std::vector<std::unique_ptr<Job>> m_jobs;
     QQueue<QUuid> m_pendingOrder;
     QUuid m_activeJob;
     QPointer<EnvManager> m_envManager;
@@ -193,3 +193,4 @@ private:
 Q_DECLARE_METATYPE(train::TrainingManager::JobStatus)
 Q_DECLARE_METATYPE(train::TrainingManager::JobType)
 Q_DECLARE_METATYPE(train::TrainingManager::JobState)
+

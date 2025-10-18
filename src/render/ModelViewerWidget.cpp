@@ -5,11 +5,11 @@
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtGui/QMouseEvent>
-#include <QtGui/QOpenGLBuffer>
 #include <QtGui/QOpenGLContext>
-#include <QtGui/QOpenGLShader>
-#include <QtGui/QOpenGLShaderProgram>
-#include <QtGui/QOpenGLVertexArrayObject>
+#include <QtOpenGL/QOpenGLBuffer>
+#include <QtOpenGL/QOpenGLShader>
+#include <QtOpenGL/QOpenGLShaderProgram>
+#include <QtOpenGL/QOpenGLVertexArrayObject>
 #include <QtGui/QWheelEvent>
 
 #include <algorithm>
@@ -162,7 +162,7 @@ void ModelViewerWidget::setViewPreset(ViewPreset preset)
     m_camera.setDistance(targetDistance);
 
     update();
-    emit cameraChanged();
+    Q_EMIT cameraChanged();
 }
 
 void ModelViewerWidget::initializeGL()
@@ -182,7 +182,7 @@ void ModelViewerWidget::initializeGL()
         const QString vendor = vendorPtr ? QString::fromLatin1(vendorPtr).trimmed() : QStringLiteral("Unknown");
         const QString renderer = rendererPtr ? QString::fromLatin1(rendererPtr).trimmed() : QStringLiteral("Unknown");
         const QString version = versionPtr ? QString::fromLatin1(versionPtr).trimmed() : QStringLiteral("Unknown");
-        emit rendererInfoChanged(vendor, renderer, version);
+        Q_EMIT rendererInfoChanged(vendor, renderer, version);
         m_rendererReported = true;
     }
 
@@ -346,7 +346,7 @@ void ModelViewerWidget::paintGL()
     if (elapsedMs >= 1'000)
     {
         const float fps = static_cast<float>(m_frameCounter) * 1'000.0f / std::max<qint64>(elapsedMs, 1);
-        emit frameStatsUpdated(fps);
+        Q_EMIT frameStatsUpdated(fps);
         m_frameCounter = 0;
         m_fpsTimer.restart();
     }

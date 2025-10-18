@@ -17,7 +17,7 @@ public:
     virtual ~IPost() = default;
 
     virtual std::string name() const = 0;
-    virtual std::string emit(const tp::Toolpath& toolpath,
+    virtual std::string generate(const tp::Toolpath& toolpath,
                              common::Unit units,
                              const tp::UserParams& params) = 0;
 };

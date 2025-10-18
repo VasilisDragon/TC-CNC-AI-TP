@@ -18,6 +18,7 @@ target_include_directories(ai
 target_link_libraries(ai
     PUBLIC
         Qt6::Core
+        render
 )
 
 if (AI_TORCH_ENABLED)

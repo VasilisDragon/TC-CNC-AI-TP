@@ -52,12 +52,6 @@
          <property name="spacing">
           <number>6</number>
          </property>
-         <property name="contentsMargins">
-          <left>0</left>
-          <top>0</top>
-          <right>0</right>
-          <bottom>0</bottom>
-         </property>
          <item>
           <widget class="QLineEdit" name="directoryLineEdit">
            <property name="placeholderText">
@@ -111,12 +105,6 @@
          <property name="spacing">
           <number>6</number>
          </property>
-         <property name="contentsMargins">
-          <left>0</left>
-          <top>0</top>
-          <right>0</right>
-          <bottom>0</bottom>
-         </property>
          <item>
           <widget class="QSlider" name="samplesSlider">
            <property name="orientation">
@@ -167,12 +155,6 @@
         <layout class="QHBoxLayout" name="diversityLayout">
          <property name="spacing">
           <number>6</number>
-         </property>
-         <property name="contentsMargins">
-          <left>0</left>
-          <top>0</top>
-          <right>0</right>
-          <bottom>0</bottom>
          </property>
          <item>
           <widget class="QSlider" name="diversitySlider">
@@ -227,12 +209,6 @@
         <layout class="QHBoxLayout" name="slopeLayout">
          <property name="spacing">
           <number>6</number>
-         </property>
-         <property name="contentsMargins">
-          <left>0</left>
-          <top>0</top>
-          <right>0</right>
-          <bottom>0</bottom>
          </property>
          <item>
           <widget class="QSlider" name="slopeSlider">

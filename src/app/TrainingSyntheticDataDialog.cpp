@@ -5,13 +5,14 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QtGlobal>
-#include <QtWidgets/QDialogButtonBox>
-#include <QtWidgets/QDoubleSpinBox>
-#include <QtWidgets/QFileDialog>
-#include <QtWidgets/QLineEdit>
-#include <QtWidgets/QSlider>
-#include <QtWidgets/QSpinBox>
-#include <QtWidgets/QToolButton>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QLineEdit>
+#include <QSlider>
+#include <QSpinBox>
+#include <QToolButton>
+#include <QPushButton>
 
 #include <cmath>
 

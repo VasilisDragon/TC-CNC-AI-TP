@@ -1,11 +1,11 @@
-﻿#include "tp/waterline/ZSlicer.h"
+#include "tp/waterline/ZSlicer.h"
 
 #include <glm/geometric.hpp>
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 
+#include <algorithm>
 #include <array>
-#include <algorithm>
-
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -17,6 +17,12 @@ namespace tp::waterline
 namespace
 {
 constexpr double kEpsilon = 1e-9;
+template <typename Vec>
+inline auto lengthSquared(const Vec& v) -> decltype(glm::dot(v, v))
+{
+    return glm::dot(v, v);
+}
+
 
 struct GridKey
 {
@@ -75,7 +81,7 @@ glm::dvec2 rotateCCW(const glm::dvec2& v)
 
 bool nearlyEqual2D(const glm::dvec2& a, const glm::dvec2& b, double tol)
 {
-    return glm::length2(a - b) <= tol * tol;
+    return lengthSquared(a - b) <= tol * tol;
 }
 
 glm::dvec2 normalForEdge(const glm::dvec2& edge, double area)
@@ -107,7 +113,7 @@ std::vector<glm::dvec2> offsetLoop(const std::vector<glm::dvec2>& loop, double r
 
         glm::dvec2 vPrev = curr - prev;
         glm::dvec2 vNext = next - curr;
-        if (glm::length2(vPrev) < kEpsilon || glm::length2(vNext) < kEpsilon)
+        if (lengthSquared(vPrev) < kEpsilon || lengthSquared(vNext) < kEpsilon)
         {
             offsetPoints.push_back(curr);
             continue;
@@ -120,7 +126,7 @@ std::vector<glm::dvec2> offsetLoop(const std::vector<glm::dvec2>& loop, double r
         glm::dvec2 nNext = normalForEdge(vNext, area);
 
         glm::dvec2 bisector = nPrev + nNext;
-        if (glm::length2(bisector) < kEpsilon)
+        if (lengthSquared(bisector) < kEpsilon)
         {
             bisector = nPrev;
         }
@@ -187,7 +193,7 @@ std::vector<std::vector<glm::dvec3>> ZSlicer::slice(double planeZ,
     segments.reserve(256);
 
     const auto addSegment = [&](const glm::dvec2& a, const glm::dvec2& b) {
-        if (glm::length2(a - b) <= m_tolerance * m_tolerance)
+        if (lengthSquared(a - b) <= m_tolerance * m_tolerance)
         {
             return;
         }
@@ -249,7 +255,7 @@ std::vector<std::vector<glm::dvec3>> ZSlicer::slice(double planeZ,
             bool duplicate = false;
             for (const glm::dvec3& existing : uniquePoints)
             {
-                if (glm::length2(glm::dvec2(existing) - glm::dvec2(p)) <= m_tolerance * m_tolerance)
+                if (lengthSquared(glm::dvec2(existing) - glm::dvec2(p)) <= m_tolerance * m_tolerance)
                 {
                     duplicate = true;
                     break;

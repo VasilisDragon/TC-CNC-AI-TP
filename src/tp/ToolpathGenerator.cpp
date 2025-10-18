@@ -1,4 +1,4 @@
-﻿#include "tp/ToolpathGenerator.h"
+#include "tp/ToolpathGenerator.h"
 
 #include "common/logging.h"
 #include "render/Model.h"
@@ -31,20 +31,6 @@
 
 namespace tp
 {
-
-struct ToolpathGenerator::PassProfile
-{
-    enum class Kind
-    {
-        Rough,
-        Finish
-    };
-
-    Kind kind{Kind::Finish};
-    double stepOver{0.0};
-    double maxStepDown{0.0};
-    double allowance{0.0};
-};
 
 namespace
 {
@@ -355,23 +341,6 @@ void applyMachineMotion(Toolpath& toolpath,
     toolpath.passes = std::move(result);
 }
 
-const char* passLabel(const ToolpathGenerator::PassProfile& profile)
-{
-    return (profile.kind == ToolpathGenerator::PassProfile::Kind::Rough) ? "Roughing" : "Finishing";
-}
-
-std::string makePassLog(const ToolpathGenerator::PassProfile& profile, const std::string& message)
-{
-    if (message.empty())
-    {
-        return {};
-    }
-
-    std::ostringstream oss;
-    oss << passLabel(profile) << ": " << message;
-    return oss.str();
-}
-
 glm::dvec3 reorderPassRange(std::vector<Polyline>& polylines,
                             std::size_t begin,
                             std::size_t end,
@@ -490,60 +459,6 @@ glm::dvec3 reorderPassRange(std::vector<Polyline>& polylines,
     }
 
     return cursor;
-}
-
-std::vector<ToolpathGenerator::PassProfile> buildPassPlan(const UserParams& params,
-                                                          const ai::StrategyDecision& decision)
-{
-    const double safeToolDiameter = std::max(params.toolDiameter, 0.1);
-    const double aiStep = (decision.stepOverMM > 0.0) ? decision.stepOverMM : 0.0;
-    double baseStep = aiStep > 0.0 ? aiStep : params.stepOver;
-    if (baseStep <= 0.0)
-    {
-        baseStep = safeToolDiameter * 0.4;
-    }
-
-    double finishStep = std::clamp(baseStep, 0.1, safeToolDiameter * 0.45);
-    double roughStep = std::max({params.stepOver, finishStep, safeToolDiameter * 0.65});
-    roughStep = std::clamp(roughStep, finishStep + 0.05, safeToolDiameter);
-
-    if (roughStep - finishStep < 0.05)
-    {
-        roughStep = std::min(safeToolDiameter, finishStep * 1.5);
-    }
-
-    const double baseStepDown = std::max(params.maxDepthPerPass, 0.1);
-    const double finishStepDown = std::max(0.1, baseStepDown * 0.5);
-
-    const double allowance = std::clamp(params.stockAllowance_mm, 0.0, safeToolDiameter);
-    const bool wantRough = decision.roughPass && params.enableRoughPass && allowance > 1e-4;
-    const bool wantFinish = decision.finishPass && params.enableFinishPass;
-
-    std::vector<ToolpathGenerator::PassProfile> plan;
-    plan.reserve(2);
-
-    if (wantRough)
-    {
-        ToolpathGenerator::PassProfile rough;
-        rough.kind = ToolpathGenerator::PassProfile::Kind::Rough;
-        rough.stepOver = roughStep;
-        rough.maxStepDown = baseStepDown;
-        rough.allowance = allowance;
-        plan.push_back(rough);
-    }
-
-    if (wantFinish || plan.empty())
-    {
-        ToolpathGenerator::PassProfile finish;
-        finish.kind = ToolpathGenerator::PassProfile::Kind::Finish;
-        finish.stepOver = plan.empty() ? finishStep : std::min(finishStep, roughStep * 0.75);
-        finish.stepOver = std::max(0.1, std::min(finish.stepOver, safeToolDiameter));
-        finish.maxStepDown = plan.empty() ? baseStepDown : finishStepDown;
-        finish.allowance = 0.0;
-        plan.push_back(finish);
-    }
-
-    return plan;
 }
 
 std::function<void(int)> makePassProgressCallback(const std::function<void(int)>& callback,
@@ -751,6 +666,77 @@ void finalizeToolpath(Toolpath& toolpath, const UserParams& params)
 }
 
 } // namespace
+
+const char* ToolpathGenerator::passLabel(const PassProfile& profile)
+{
+    return (profile.kind == PassProfile::Kind::Rough) ? "Roughing" : "Finishing";
+}
+
+std::string ToolpathGenerator::makePassLog(const PassProfile& profile, const std::string& message)
+{
+    if (message.empty())
+    {
+        return {};
+    }
+
+    std::ostringstream oss;
+    oss << passLabel(profile) << ": " << message;
+    return oss.str();
+}
+
+std::vector<ToolpathGenerator::PassProfile> ToolpathGenerator::buildPassPlan(const UserParams& params,
+                                                                             const ai::StrategyDecision& decision)
+{
+    const double safeToolDiameter = std::max(params.toolDiameter, 0.1);
+    const double aiStep = (decision.stepOverMM > 0.0) ? decision.stepOverMM : 0.0;
+    double baseStep = aiStep > 0.0 ? aiStep : params.stepOver;
+    if (baseStep <= 0.0)
+    {
+        baseStep = safeToolDiameter * 0.4;
+    }
+
+    double finishStep = std::clamp(baseStep, 0.1, safeToolDiameter * 0.45);
+    double roughStep = std::max({params.stepOver, finishStep, safeToolDiameter * 0.65});
+    roughStep = std::clamp(roughStep, finishStep + 0.05, safeToolDiameter);
+
+    if (roughStep - finishStep < 0.05)
+    {
+        roughStep = std::min(safeToolDiameter, finishStep * 1.5);
+    }
+
+    const double baseStepDown = std::max(params.maxDepthPerPass, 0.1);
+    const double finishStepDown = std::max(0.1, baseStepDown * 0.5);
+
+    const double allowance = std::clamp(params.stockAllowance_mm, 0.0, safeToolDiameter);
+    const bool wantRough = decision.roughPass && params.enableRoughPass && allowance > 1e-4;
+    const bool wantFinish = decision.finishPass && params.enableFinishPass;
+
+    std::vector<PassProfile> plan;
+    plan.reserve(2);
+
+    if (wantRough)
+    {
+        PassProfile rough;
+        rough.kind = PassProfile::Kind::Rough;
+        rough.stepOver = roughStep;
+        rough.maxStepDown = baseStepDown;
+        rough.allowance = allowance;
+        plan.push_back(rough);
+    }
+
+    if (wantFinish || plan.empty())
+    {
+        PassProfile finish;
+        finish.kind = PassProfile::Kind::Finish;
+        finish.stepOver = plan.empty() ? finishStep : std::min(finishStep, roughStep * 0.75);
+        finish.stepOver = std::max(0.1, std::min(finish.stepOver, safeToolDiameter));
+        finish.maxStepDown = finishStepDown;
+        finish.allowance = 0.0;
+        plan.push_back(finish);
+    }
+
+    return plan;
+}
 
 Toolpath ToolpathGenerator::generate(const render::Model& model,
                                      const UserParams& params,

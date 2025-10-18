@@ -142,6 +142,15 @@ StrategyDecision OnnxAI::predict(const render::Model& model,
 {
     m_lastLatencyMs = 0.0;
     StrategyDecision decision = fallbackDecision(params);
+
+    auto featuresOpt = buildFeatures(model, params);
+    if (!featuresOpt)
+    {
+        m_lastError = "Feature extraction produced an invalid descriptor.";
+        qWarning().noquote() << "OnnxAI: feature extraction failed, falling back to heuristics.";
+        return decision;
+    }
+
 #ifdef AI_WITH_ONNXRUNTIME
     if (!m_loaded || !m_session)
     {
@@ -150,7 +159,7 @@ StrategyDecision OnnxAI::predict(const render::Model& model,
 
     try
     {
-        std::vector<float> features = buildFeatures(model, params);
+        std::vector<float> features = std::move(*featuresOpt);
         std::vector<int64_t> inputShape{1, static_cast<int64_t>(features.size())};
 
         Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeDefault);
@@ -251,6 +260,8 @@ StrategyDecision OnnxAI::predict(const render::Model& model,
         m_lastError = e.what();
         qWarning().noquote() << "OnnxAI inference failed:" << QString::fromStdString(m_lastError);
     }
+#else
+    (void)featuresOpt;
 #endif
     return decision;
 }
@@ -511,16 +522,20 @@ void OnnxAI::logFeaturePreview(const std::vector<float>& features) const
                       << "preview [" << previewValues.join(QStringLiteral(", ")) << "]";
 }
 
-std::vector<float> OnnxAI::buildFeatures(const render::Model& model,
-                                         const tp::UserParams& params) const
+std::optional<std::vector<float>> OnnxAI::buildFeatures(const render::Model& model,
+                                                        const tp::UserParams& params) const
 {
     const auto global = FeatureExtractor::computeGlobalFeatures(model);
+    if (!global.valid)
+    {
+        return std::nullopt;
+    }
     std::vector<float> features = FeatureExtractor::toVector(global);
     features.reserve(features.size() + 2);
     features.push_back(static_cast<float>(params.stepOver));
     features.push_back(static_cast<float>(params.toolDiameter));
     logFeaturePreview(features);
-    return alignFeatureVector(std::move(features));
+    return std::make_optional(alignFeatureVector(std::move(features)));
 }
 
 } // namespace ai

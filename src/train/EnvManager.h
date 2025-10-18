@@ -28,7 +28,7 @@ public:
     [[nodiscard]] QString gpuSummary() const;
     void refreshGpuInfo();
 
-signals:
+    Q_SIGNALS:
     void progress(int value);
     void log(const QString& message);
     void finished(bool success);
@@ -45,6 +45,7 @@ private:
     bool extractEmbeddedPython(const QString& archivePath, QString& errorMessage);
     bool ensureVenv(QString& errorMessage);
     bool installPackages(QString& errorMessage);
+    bool verifyEmbeddedPythonArchive(const QString& archivePath, QString& errorMessage);
     bool runProcess(const QString& program,
                     const QStringList& arguments,
                     const QString& workingDirectory,

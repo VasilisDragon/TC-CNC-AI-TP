@@ -1,21 +1,21 @@
 #include "app/MainWindow.h"
 
 
-
 #include "app/AiPreferencesDialog.h"
 #include "app/BuildInfo.h"
 #include "app/ToolpathSettingsWidget.h"
-#include "app/TrainingNewModelDialog.h"
-#include "app/TrainingSyntheticDataDialog.h"
+#include "common/ToolLibrary.h"
+#include "common/Units.h"
 #include "ai/ModelManager.h"
 #include "ai/IPathAI.h"
 #include "ai/TorchAI.h"
-#include "ai/OnnxAI.h"
+#ifdef AI_WITH_ONNXRUNTIME
+#    include "ai/OnnxAI.h"
+#endif
 #include "io/ImportWorker.h"
 #include "tp/GenerateWorker.h"
 #include "tp/GCodeExporter.h"
 #include "tp/GRBLPost.h"
-#include "common/Units.h"
 #include "render/Model.h"
 #include "render/ModelViewerWidget.h"
 #include "render/SimulationController.h"
@@ -37,53 +37,48 @@
 #include <QtCore/QSize>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QStringList>
-#include <QtCore/QRegularExpression>
 #include <QtCore/Qt>
 #include <QtCore/QTimer>
-#include <QtCore/QUrl>
-#include <QtWidgets/QProgressDialog>
-#include <QtWidgets/QToolBar>
-#include <QtWidgets/QSlider>
-#include <QtWidgets/QLabel>
-#include <QtWidgets/QStyle>
-#include <QtWidgets/QStatusBar>
-#include <QtWidgets/QFrame>
+#include <QtGui/QCloseEvent>
+
+#include <QtGui/QPalette>
+#include <QAction>
+#include <QActionGroup>
+#include <QApplication>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDockWidget>
+#include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QFormLayout>
+#include <QGroupBox>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
+#include <QPlainTextEdit>
+#include <QProgressBar>
+#include <QProgressDialog>
+#include <QPushButton>
+#include <QSlider>
+#include <QStatusBar>
+#include <QTabWidget>
+#include <QTableWidget>
+#include <QToolBar>
+#include <QStyle>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QFrame>
+#include <QFrame>
+#include <QVBoxLayout>
 
 #include <algorithm>
-#include <QtGui/QCloseEvent>
-#include <QtWidgets/QAction>
-#include <QtWidgets/QActionGroup>
-#include <QtWidgets/QComboBox>
-#include <QtWidgets/QSizePolicy>
-#include <QtWidgets/QDialog>
-#include <QtWidgets/QDialogButtonBox>
-#include <QtWidgets/QHBoxLayout>
-#include <QtWidgets/QAbstractItemView>
-#include <QtWidgets/QApplication>
-#include <QtWidgets/QDockWidget>
-#include <QtWidgets/QFileDialog>
-#include <QtWidgets/QHeaderView>
-#include <QtWidgets/QFormLayout>
-#include <QtWidgets/QLineEdit>
-#include <QtWidgets/QLabel>
-#include <QtWidgets/QGroupBox>
-#include <QtWidgets/QListWidget>
-#include <QtWidgets/QMenu>
-#include <QtWidgets/QMenuBar>
-#include <QtWidgets/QMessageBox>
-#include <QtWidgets/QPlainTextEdit>
-#include <QtWidgets/QPushButton>
-#include <QtWidgets/QTabWidget>
-#include <QtWidgets/QTableWidget>
-#include <QtWidgets/QDoubleSpinBox>
-#include <QtWidgets/QCheckBox>
-#include <QtWidgets/QVBoxLayout>
-#include <QtWidgets/QProgressBar>
-
-#include <QtCore/QTextStream>
-#include <QtGui/QDesktopServices>
-#include <QtGui/QPalette>
-#include <QtGui/QColor>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -124,10 +119,12 @@ QString backendBadge(ai::ModelDescriptor::Backend backend)
 
 QString runtimeBadge(const ai::IPathAI* ai)
 {
+#ifdef AI_WITH_ONNXRUNTIME
     if (dynamic_cast<const ai::OnnxAI*>(ai))
     {
         return QStringLiteral("[ONNX]");
     }
+#endif
     return QStringLiteral("[Torch]");
 }
 
@@ -137,10 +134,12 @@ QString runtimeDevice(const ai::IPathAI* ai)
     {
         return QString::fromStdString(torchAi->device());
     }
+#ifdef AI_WITH_ONNXRUNTIME
     if (const auto* onnxAi = dynamic_cast<const ai::OnnxAI*>(ai))
     {
         return QString::fromStdString(onnxAi->device());
     }
+#endif
     return QStringLiteral("CPU");
 }
 
@@ -150,10 +149,12 @@ bool runtimeLoaded(const ai::IPathAI* ai)
     {
         return torchAi->isLoaded();
     }
+#ifdef AI_WITH_ONNXRUNTIME
     if (const auto* onnxAi = dynamic_cast<const ai::OnnxAI*>(ai))
     {
         return onnxAi->isLoaded();
     }
+#endif
     return false;
 }
 
@@ -163,10 +164,12 @@ QString runtimeLastError(const ai::IPathAI* ai)
     {
         return QString::fromStdString(torchAi->lastError());
     }
+#ifdef AI_WITH_ONNXRUNTIME
     if (const auto* onnxAi = dynamic_cast<const ai::OnnxAI*>(ai))
     {
         return QString::fromStdString(onnxAi->lastError());
     }
+#endif
     return QString();
 }
 
@@ -176,10 +179,12 @@ double runtimeLatencyMs(const ai::IPathAI* ai)
     {
         return torchAi->lastLatencyMs();
     }
+#ifdef AI_WITH_ONNXRUNTIME
     if (const auto* onnxAi = dynamic_cast<const ai::OnnxAI*>(ai))
     {
         return onnxAi->lastLatencyMs();
     }
+#endif
     return 0.0;
 }
 
@@ -189,10 +194,14 @@ void setRuntimeForceCpu(ai::IPathAI* ai, bool forceCpu)
     {
         torchAi->setForceCpu(forceCpu);
     }
+#ifdef AI_WITH_ONNXRUNTIME
     else if (auto* onnxAi = dynamic_cast<ai::OnnxAI*>(ai))
     {
         onnxAi->setForceCpu(forceCpu);
     }
+#else
+    (void)forceCpu;
+#endif
 }
 
 } // namespace
@@ -207,12 +216,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     setWindowTitle(tr("AIToolpathGenerator"));
     resize(1280, 800);
-    m_envManager = new train::EnvManager(this);
 
     applyDarkTheme();
 
     m_modelManager = std::make_unique<ai::ModelManager>();
-    ensureTrainingManager();
     m_aiModelLabel = tr("Default");
     m_stock = tp::makeDefaultStock();
     m_machine = tp::makeDefaultMachine();
@@ -230,16 +237,6 @@ MainWindow::MainWindow(QWidget* parent)
     createMenus();
     createStatusBar();
     createDockWidgets();
-    if (m_envManager) {
-        connect(m_envManager, &train::EnvManager::log, this, &MainWindow::appendEnvLog);
-        connect(m_envManager, &train::EnvManager::progress, this, &MainWindow::onEnvProgress);
-        connect(m_envManager, &train::EnvManager::finished, this, &MainWindow::onEnvFinished);
-        connect(m_envManager, &train::EnvManager::error, this, &MainWindow::onEnvError);
-        connect(m_envManager, &train::EnvManager::gpuInfoChanged, this, &MainWindow::onGpuInfoChanged);
-        m_envManager->refreshGpuInfo();
-        onGpuInfoChanged(m_envManager->gpuSummary());
-        updateEnvironmentControls(false);
-    }
     createCameraToolbar();
     createSimulationToolbar();
     loadToolLibrary();
@@ -404,43 +401,12 @@ void MainWindow::createMenus()
         aiMenu->addAction(preferencesAction.release());
     }
 
-    createTrainingMenu();
-
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
     {
         auto aboutAction = makeAction(this, tr("&About"));
         connect(aboutAction.get(), &QAction::triggered, this, &MainWindow::showAboutDialog);
         helpMenu->addAction(aboutAction.release());
     }
-}
-
-void MainWindow::createTrainingMenu()
-{
-    ensureTrainingManager();
-
-    auto* trainingMenu = menuBar()->addMenu(tr("&Training"));
-
-    m_trainingNewModelAction = trainingMenu->addAction(tr("New Model..."));
-    m_trainingNewModelAction->setToolTip(tr("Launch a training run with optional base weights."));
-    connect(m_trainingNewModelAction, &QAction::triggered, this, &MainWindow::openTrainingNewModelDialog);
-
-    m_trainingSyntheticAction = trainingMenu->addAction(tr("Generate Synthetic Data..."));
-    m_trainingSyntheticAction->setToolTip(tr("Synthesize geometry samples for training and validation."));
-    connect(m_trainingSyntheticAction, &QAction::triggered, this, &MainWindow::openSyntheticDataDialog);
-
-    m_trainingFineTuneAction = trainingMenu->addAction(tr("Fine-Tune Current Model..."));
-    m_trainingFineTuneAction->setToolTip(tr("Continue training using the active model as a starting point."));
-    connect(m_trainingFineTuneAction, &QAction::triggered, this, &MainWindow::fineTuneCurrentModel);
-
-    trainingMenu->addSeparator();
-
-    m_trainingOpenModelsAction = trainingMenu->addAction(tr("Open Models Folder"));
-    connect(m_trainingOpenModelsAction, &QAction::triggered, this, &MainWindow::openModelsFolder);
-
-    m_trainingOpenDatasetsAction = trainingMenu->addAction(tr("Open Datasets Folder"));
-    connect(m_trainingOpenDatasetsAction, &QAction::triggered, this, &MainWindow::openDatasetsFolder);
-
-    updateTrainingActions();
 }
 
 void MainWindow::createDockWidgets()
@@ -464,99 +430,6 @@ void MainWindow::createDockWidgets()
     dockLayout->addWidget(m_toolpathSettings);
 
     setupStockMachineControls(dockContainer, dockLayout);
-
-    m_passGroup = new QGroupBox(tr("Pass Planning"), dockContainer);
-    auto* passLayout = new QVBoxLayout(m_passGroup);
-    passLayout->setContentsMargins(8, 8, 8, 8);
-    passLayout->setSpacing(6);
-
-    m_enableRoughPassCheck = new QCheckBox(tr("Enable roughing pass"), m_passGroup);
-    m_enableFinishPassCheck = new QCheckBox(tr("Enable finishing pass"), m_passGroup);
-    passLayout->addWidget(m_enableRoughPassCheck);
-    passLayout->addWidget(m_enableFinishPassCheck);
-
-    auto* passForm = new QFormLayout();
-    passForm->setContentsMargins(0, 0, 0, 0);
-    passForm->setSpacing(4);
-
-    m_stockAllowanceSpin = new QDoubleSpinBox(m_passGroup);
-    m_stockAllowanceSpin->setDecimals(3);
-    m_stockAllowanceSpin->setToolTip(tr("Material to leave after roughing."));
-    passForm->addRow(tr("Stock allowance"), m_stockAllowanceSpin);
-
-    m_rampAngleSpin = new QDoubleSpinBox(m_passGroup);
-    m_rampAngleSpin->setDecimals(1);
-    m_rampAngleSpin->setRange(0.5, 30.0);
-    m_rampAngleSpin->setSingleStep(0.5);
-    m_rampAngleSpin->setSuffix(tr(" deg"));
-    m_rampAngleSpin->setToolTip(tr("Lead-in ramp angle in degrees."));
-    passForm->addRow(tr("Ramp angle"), m_rampAngleSpin);
-
-    passLayout->addLayout(passForm);
-    dockLayout->addWidget(m_passGroup);
-
-    auto ensureOnePassEnabled = [this]() {
-        if (!m_enableRoughPassCheck || !m_enableFinishPassCheck)
-        {
-            return;
-        }
-        if (!m_enableRoughPassCheck->isChecked() && !m_enableFinishPassCheck->isChecked())
-        {
-            QSignalBlocker finishBlocker(m_enableFinishPassCheck);
-            m_enableFinishPassCheck->setChecked(true);
-            m_enableFinishPassUser = true;
-        }
-    };
-
-    connect(m_enableRoughPassCheck, &QCheckBox::toggled, this, [this, ensureOnePassEnabled](bool checked) {
-        m_enableRoughPassUser = checked;
-        ensureOnePassEnabled();
-        if (!m_enableFinishPassCheck)
-        {
-            return;
-        }
-        m_enableFinishPassUser = m_enableFinishPassCheck->isChecked();
-        if (!m_loadingSettings)
-        {
-            saveSettings();
-        }
-    });
-    connect(m_enableFinishPassCheck, &QCheckBox::toggled, this, [this, ensureOnePassEnabled](bool checked) {
-        m_enableFinishPassUser = checked;
-        ensureOnePassEnabled();
-        if (!m_enableRoughPassCheck)
-        {
-            return;
-        }
-        m_enableRoughPassUser = m_enableRoughPassCheck->isChecked();
-        if (!m_loadingSettings)
-        {
-            saveSettings();
-        }
-    });
-    connect(m_stockAllowanceSpin,
-            qOverload<double>(&QDoubleSpinBox::valueChanged),
-            this,
-            [this](double value) {
-                m_stockAllowanceMm = std::max(0.0, lengthMmFromDisplay(value));
-                if (!m_loadingSettings)
-                {
-                    saveSettings();
-                }
-            });
-    connect(m_rampAngleSpin,
-            qOverload<double>(&QDoubleSpinBox::valueChanged),
-            this,
-            [this](double value) {
-                m_rampAngleDeg = value;
-                if (!m_loadingSettings)
-                {
-                    saveSettings();
-                }
-            });
-
-    syncPassControlsFromData();
-    updatePassControlUnits();
 
     auto* aiLabel = new QLabel(tr("AI Model"), dockContainer);
     dockLayout->addWidget(aiLabel);
@@ -599,114 +472,10 @@ void MainWindow::createDockWidgets()
     consoleDock->setWidget(m_consoleTabs);
     addDockWidget(Qt::BottomDockWidgetArea, consoleDock);
 
-    auto* envDock = new QDockWidget(tr("Training Environment"), this);
-    envDock->setObjectName(QStringLiteral("TrainingEnvironmentDock"));
-    auto* envWidget = new QWidget(envDock);
-    auto* envLayout = new QVBoxLayout(envWidget);
-    envLayout->setContentsMargins(12, 12, 12, 12);
-    envLayout->setSpacing(8);
-
-    m_envGpuLabel = new QLabel(tr("GPU: detecting..."), envWidget);
-    envLayout->addWidget(m_envGpuLabel);
-
-    m_envCpuOnlyCheck = new QCheckBox(tr("CPU-only mode"), envWidget);
-    envLayout->addWidget(m_envCpuOnlyCheck);
-
-    auto* buttonRow = new QHBoxLayout();
-    buttonRow->setContentsMargins(0, 0, 0, 0);
-    buttonRow->setSpacing(8);
-
-    m_envPrepareButton = new QPushButton(tr("Prepare Environment"), envWidget);
-    m_envCancelButton = new QPushButton(tr("Cancel"), envWidget);
-    m_envCancelButton->setEnabled(false);
-
-    buttonRow->addWidget(m_envPrepareButton);
-    buttonRow->addWidget(m_envCancelButton);
-    envLayout->addLayout(buttonRow);
-
-    m_envProgress = new QProgressBar(envWidget);
-    m_envProgress->setRange(0, 100);
-    m_envProgress->setValue(0);
-    m_envProgress->setFormat(QStringLiteral("%p%"));
-    envLayout->addWidget(m_envProgress);
-
-    m_envLog = new QPlainTextEdit(envWidget);
-    m_envLog->setReadOnly(true);
-    m_envLog->setMaximumBlockCount(2'000);
-    m_envLog->setPlaceholderText(tr("Environment preparation logs will appear here."));
-    envLayout->addWidget(m_envLog, 1);
-
-    envWidget->setLayout(envLayout);
-    envDock->setWidget(envWidget);
-    addDockWidget(Qt::RightDockWidgetArea, envDock);
-    createJobsDock(envDock);
-
     connect(m_toolpathSettings, &ToolpathSettingsWidget::generateRequested, this, &MainWindow::onToolpathRequested);
     connect(m_toolpathSettings, &ToolpathSettingsWidget::toolChanged, this, &MainWindow::onToolSelected);
     connect(m_toolpathSettings, &ToolpathSettingsWidget::warningGenerated, this, &MainWindow::logWarning);
     connect(m_aiModelCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onAiComboChanged);
-    connect(m_envPrepareButton, &QPushButton::clicked, this, &MainWindow::startEnvironmentPreparation);
-    connect(m_envCancelButton, &QPushButton::clicked, this, &MainWindow::cancelEnvironmentPreparation);
-    connect(m_envCpuOnlyCheck, &QCheckBox::toggled, this, [this](bool checked) {
-        if (m_envManager)
-        {
-            m_envManager->setCpuOnly(checked);
-        }
-        if (!m_loadingSettings)
-        {
-            saveSettings();
-        }
-    });
-}
-
-void MainWindow::createJobsDock(QDockWidget* envDock)
-{
-    if (m_jobsDock)
-    {
-        return;
-    }
-
-    m_jobsDock = new QDockWidget(tr("Training Jobs"), this);
-    m_jobsDock->setObjectName(QStringLiteral("TrainingJobsDock"));
-    m_jobsDock->setMinimumWidth(320);
-
-    auto* container = new QWidget(m_jobsDock);
-    auto* layout = new QVBoxLayout(container);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(8);
-
-    m_jobsList = new QListWidget(container);
-    m_jobsList->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_jobsList->setUniformItemSizes(false);
-    m_jobsList->setSpacing(6);
-    layout->addWidget(m_jobsList);
-
-    m_jobSelectionLabel = new QLabel(tr("Select a job to view logs."), container);
-    layout->addWidget(m_jobSelectionLabel);
-
-    m_jobLog = new QPlainTextEdit(container);
-    m_jobLog->setReadOnly(true);
-    m_jobLog->setMaximumBlockCount(4000);
-    m_jobLog->setPlaceholderText(tr("Job output will appear here."));
-    layout->addWidget(m_jobLog, 1);
-
-    container->setLayout(layout);
-    m_jobsDock->setWidget(container);
-
-    addDockWidget(Qt::RightDockWidgetArea, m_jobsDock);
-    if (envDock)
-    {
-        tabifyDockWidget(envDock, m_jobsDock);
-        envDock->raise();
-    }
-
-    connect(
-        m_jobsList,
-        &QListWidget::currentItemChanged,
-        this,
-        [this](QListWidgetItem*, QListWidgetItem*) {
-            onJobSelectionChanged();
-        });
 }
 
 void MainWindow::createCameraToolbar()
@@ -992,7 +761,7 @@ void MainWindow::setupStockMachineControls(QWidget* container, QVBoxLayout* layo
     originLayout->setContentsMargins(0, 0, 0, 0);
     originLayout->setSpacing(6);
 
-    auto addOriginField = [originLayout, this](const QString& labelText, QDoubleSpinBox*& targetSpin) {
+    auto addOriginField = [originLayout, this, &createCoordinateSpin](const QString& labelText, QDoubleSpinBox*& targetSpin) {
         auto* label = new QLabel(labelText, m_stockMachineGroup);
         label->setMinimumWidth(16);
         targetSpin = createCoordinateSpin();
@@ -1241,728 +1010,6 @@ void MainWindow::syncMachineDataFromUi()
     m_blockMachineSignals = false;
 }
 
-void MainWindow::syncPassControlsFromData()
-{
-    if (!m_stockAllowanceSpin || !m_rampAngleSpin || !m_enableRoughPassCheck || !m_enableFinishPassCheck)
-    {
-        return;
-    }
-
-    const QSignalBlocker allowanceBlocker(m_stockAllowanceSpin);
-    const QSignalBlocker rampBlocker(m_rampAngleSpin);
-    const QSignalBlocker roughBlocker(m_enableRoughPassCheck);
-    const QSignalBlocker finishBlocker(m_enableFinishPassCheck);
-
-    m_stockAllowanceSpin->setValue(lengthDisplayFromMm(m_stockAllowanceMm));
-    m_rampAngleSpin->setValue(m_rampAngleDeg);
-    m_enableRoughPassCheck->setChecked(m_enableRoughPassUser);
-    m_enableFinishPassCheck->setChecked(m_enableFinishPassUser);
-}
-
-void MainWindow::updatePassControlUnits()
-{
-    if (!m_stockAllowanceSpin)
-    {
-        return;
-    }
-
-    QSignalBlocker allowanceBlocker(m_stockAllowanceSpin);
-    m_stockAllowanceSpin->setSuffix(QStringLiteral(" %1").arg(common::unitSuffix(m_units)));
-    m_stockAllowanceSpin->setSingleStep(lengthDisplayFromMm(0.05));
-    m_stockAllowanceSpin->setRange(lengthDisplayFromMm(0.0), lengthDisplayFromMm(5.0));
-    m_stockAllowanceSpin->setValue(lengthDisplayFromMm(m_stockAllowanceMm));
-
-    if (m_rampAngleSpin)
-    {
-        QSignalBlocker rampBlocker(m_rampAngleSpin);
-        m_rampAngleSpin->setSuffix(tr(" deg"));
-        m_rampAngleSpin->setValue(m_rampAngleDeg);
-    }
-}
-
-void MainWindow::applyPassPreferences(tp::UserParams& params) const
-{
-    const bool roughEnabled = m_enableRoughPassCheck ? m_enableRoughPassCheck->isChecked() : m_enableRoughPassUser;
-    const bool finishEnabled = m_enableFinishPassCheck ? m_enableFinishPassCheck->isChecked() : m_enableFinishPassUser;
-
-    params.enableRoughPass = roughEnabled;
-void MainWindow::appendEnvLog(const QString& text)
-{
-    if (!m_envLog)
-    {
-        return;
-    }
-    m_envLog->appendPlainText(text);
-}
-
-void MainWindow::updateEnvironmentControls(bool busy)
-{
-    if (m_envPrepareButton)
-    {
-        m_envPrepareButton->setEnabled(!busy);
-    }
-    if (m_envCancelButton)
-    {
-        m_envCancelButton->setEnabled(busy);
-    }
-    updateTrainingActions();
-}
-
-void MainWindow::startEnvironmentPreparation()
-{
-    if (!m_envManager)
-    {
-        return;
-    }
-    if (m_envManager->isBusy())
-    {
-        return;
-    }
-    m_envReady = false;
-    updateEnvironmentControls(true);
-    if (m_envProgress)
-    {
-        m_envProgress->setValue(0);
-    }
-    if (m_envCpuOnlyCheck)
-    {
-        m_envManager->setCpuOnly(m_envCpuOnlyCheck->isChecked());
-    }
-    m_envManager->prepareEnvironment(false);
-}
-void MainWindow::cancelEnvironmentPreparation()
-{
-    if (!m_envManager)
-    {
-        return;
-    }
-    m_envManager->cancel();
-    updateEnvironmentControls(false);
-}
-
-void MainWindow::onEnvProgress(int value)
-{
-    if (m_envProgress)
-    {
-        m_envProgress->setValue(value);
-    }
-}
-
-void MainWindow::onEnvFinished(bool success)
-{
-    m_envReady = success;
-    updateEnvironmentControls(false);
-    if (m_envProgress && success)
-    {
-        m_envProgress->setValue(100);
-    }
-    if (statusBar())
-    {
-        statusBar()->showMessage(success ? tr("Training environment ready.") : tr("Environment not prepared."), 5000);
-    }
-}
-
-void MainWindow::onEnvError(const QString& message)
-{
-    m_envReady = false;
-    updateEnvironmentControls(false);
-    if (m_envLog)
-    {
-        m_envLog->appendPlainText(message);
-    }
-    if (statusBar())
-    {
-        statusBar()->showMessage(message, 8000);
-    }
-}
-
-void MainWindow::onGpuInfoChanged(const QString& info)
-{
-    if (m_envGpuLabel)
-    {
-        m_envGpuLabel->setText(info);
-        m_envGpuLabel->setToolTip(info);
-    }
-}
-void MainWindow::ensureTrainingManager()
-{
-    if (!m_trainingManager)
-    {
-        m_trainingManager = new train::TrainingManager(this);
-        if (m_envManager)
-        {
-            m_trainingManager->setEnvManager(m_envManager);
-        }
-
-        connect(m_trainingManager,
-                &train::TrainingManager::jobAdded,
-                this,
-                &MainWindow::onTrainingJobAdded);
-        connect(m_trainingManager,
-                &train::TrainingManager::jobUpdated,
-                this,
-                &MainWindow::onTrainingJobUpdated);
-        connect(m_trainingManager,
-                &train::TrainingManager::jobRemoved,
-                this,
-                &MainWindow::onTrainingJobRemoved);
-        connect(m_trainingManager,
-                &train::TrainingManager::jobLog,
-                this,
-                &MainWindow::onTrainingJobLog);
-        connect(m_trainingManager,
-                &train::TrainingManager::toastRequested,
-                this,
-                &MainWindow::onTrainingToast);
-        connect(m_trainingManager,
-                &train::TrainingManager::modelRegistered,
-                this,
-                &MainWindow::onTrainingModelRegistered);
-    }
-    else if (m_envManager)
-    {
-        m_trainingManager->setEnvManager(m_envManager);
-    }
-
-    if (m_trainingManager && m_modelManager)
-    {
-        m_trainingManager->setModelManager(m_modelManager.get());
-    }
-}
-
-bool MainWindow::isGpuAvailableForTraining() const
-{
-    if (!m_envManager)
-    {
-        return false;
-    }
-    const QString summary = m_envManager->gpuSummary();
-    if (summary.isEmpty())
-    {
-        return false;
-    }
-    return !summary.contains(QStringLiteral("none"), Qt::CaseInsensitive);
-}
-
-void MainWindow::updateTrainingActions()
-{
-    const bool hasManager = m_trainingManager != nullptr;
-    const bool envBusy = m_envManager && m_envManager->isBusy();
-    const bool ready = hasManager && m_envReady && !envBusy;
-
-    if (m_trainingNewModelAction)
-    {
-        m_trainingNewModelAction->setEnabled(ready);
-    }
-    if (m_trainingSyntheticAction)
-    {
-        m_trainingSyntheticAction->setEnabled(ready);
-    }
-    if (m_trainingFineTuneAction)
-    {
-        const bool hasActiveModel = !m_aiModelPath.isEmpty();
-        m_trainingFineTuneAction->setEnabled(ready && hasActiveModel);
-    }
-    if (m_trainingOpenModelsAction)
-    {
-        m_trainingOpenModelsAction->setEnabled(hasManager);
-    }
-    if (m_trainingOpenDatasetsAction)
-    {
-        m_trainingOpenDatasetsAction->setEnabled(hasManager);
-    }
-}
-
-void MainWindow::openTrainingNewModelDialog()
-{
-    ensureTrainingManager();
-    if (!m_trainingManager)
-    {
-        return;
-    }
-
-    const QVector<ai::ModelDescriptor>& models = m_modelManager ? m_modelManager->models() : QVector<ai::ModelDescriptor>{};
-    TrainingNewModelDialog dialog(models, isGpuAvailableForTraining(), this);
-    dialog.setWindowTitle(tr("New Model"));
-    if (dialog.exec() != QDialog::Accepted)
-    {
-        return;
-    }
-
-    train::TrainingManager::TrainJobRequest request;
-    request.modelName = dialog.modelName();
-    request.datasetPath = dialog.datasetPath();
-    request.baseModelPath = dialog.baseModelPath();
-    request.device = dialog.device();
-    request.epochs = dialog.epochs();
-    request.learningRate = dialog.learningRate();
-    request.useV2Features = dialog.useV2Features();
-    request.fineTune = false;
-
-    if (!request.datasetPath.isEmpty())
-    {
-        request.datasetPath = QDir::toNativeSeparators(request.datasetPath);
-    }
-    if (!request.baseModelPath.isEmpty())
-    {
-        request.baseModelPath = QDir::toNativeSeparators(request.baseModelPath);
-    }
-
-    m_trainingManager->enqueueTraining(request);
-    if (statusBar())
-    {
-        statusBar()->showMessage(tr("Queued training job: %1").arg(request.modelName), 5000);
-    }
-}
-
-void MainWindow::openSyntheticDataDialog()
-{
-    ensureTrainingManager();
-    if (!m_trainingManager)
-    {
-        return;
-    }
-
-    TrainingSyntheticDataDialog dialog(m_trainingManager->datasetsRoot(), this);
-    if (dialog.exec() != QDialog::Accepted)
-    {
-        return;
-    }
-
-    train::TrainingManager::SyntheticJobRequest request;
-    request.label = dialog.datasetLabel();
-    request.sampleCount = dialog.sampleCount();
-    request.diversity = dialog.diversity();
-    request.slopeMix = dialog.slopeMix();
-    request.overwrite = dialog.overwriteExisting();
-    request.outputDir = dialog.outputDirectory();
-
-    m_trainingManager->enqueueSyntheticDataset(request);
-    if (statusBar())
-    {
-        statusBar()->showMessage(tr("Queued dataset generation: %1").arg(request.label), 5000);
-    }
-}
-
-void MainWindow::fineTuneCurrentModel()
-{
-    ensureTrainingManager();
-    if (!m_trainingManager)
-    {
-        return;
-    }
-    if (m_aiModelPath.isEmpty())
-    {
-        onTrainingToast(tr("Select an AI model before fine-tuning."));
-        return;
-    }
-
-    const QString datasetRoot = m_trainingManager->datasetsRoot();
-    const QString datasetSelection =
-        QFileDialog::getExistingDirectory(this, tr("Select Dataset Folder"), datasetRoot);
-    if (datasetSelection.isEmpty())
-    {
-        return;
-    }
-
-    const QVector<ai::ModelDescriptor>& models = m_modelManager ? m_modelManager->models() : QVector<ai::ModelDescriptor>{};
-    TrainingNewModelDialog dialog(models, isGpuAvailableForTraining(), this);
-    dialog.setWindowTitle(tr("Fine-Tune Current Model"));
-    dialog.lockBaseModel(m_aiModelPath);
-    dialog.setSuggestedName(QFileInfo(m_aiModelPath).completeBaseName() + QStringLiteral("_ft"));
-    dialog.setSuggestedDataset(datasetSelection);
-    if (dialog.exec() != QDialog::Accepted)
-    {
-        return;
-    }
-
-    train::TrainingManager::TrainJobRequest request;
-    request.modelName = dialog.modelName();
-    request.datasetPath = dialog.datasetPath();
-    if (request.datasetPath.isEmpty())
-    {
-        request.datasetPath = datasetSelection;
-    }
-    if (request.datasetPath.isEmpty())
-    {
-        onTrainingToast(tr("Select a dataset folder before fine-tuning."));
-        return;
-    }
-    request.datasetPath = QDir::toNativeSeparators(request.datasetPath);
-    request.baseModelPath = QDir::toNativeSeparators(dialog.baseModelPath());
-    request.device = dialog.device();
-    request.epochs = dialog.epochs();
-    request.learningRate = dialog.learningRate();
-    request.useV2Features = dialog.useV2Features();
-    request.fineTune = true;
-
-    m_trainingManager->enqueueTraining(request);
-    if (statusBar())
-    {
-        statusBar()->showMessage(tr("Queued fine-tune job: %1").arg(request.modelName), 5000);
-    }
-}\r\n
-void MainWindow::openModelsFolder()
-{
-    ensureTrainingManager();
-    if (!m_trainingManager)
-    {
-        return;
-    }
-    const QString path = m_trainingManager->modelsRoot();
-    if (!QFileInfo::exists(path))
-    {
-        QDir().mkpath(path);
-    }
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-}
-
-void MainWindow::openDatasetsFolder()
-{
-    ensureTrainingManager();
-    if (!m_trainingManager)
-    {
-        return;
-    }
-    const QString path = m_trainingManager->datasetsRoot();
-    if (!QFileInfo::exists(path))
-    {
-        QDir().mkpath(path);
-    }
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-}
-
-void MainWindow::onTrainingJobAdded(const train::TrainingManager::JobStatus& status)
-{
-    ensureTrainingManager();
-    if (!m_jobsList)
-    {
-        return;
-    }
-
-    JobWidgets widgets;
-    widgets.item = new QListWidgetItem(m_jobsList);
-    widgets.container = new QWidget(m_jobsList);
-
-    auto* layout = new QVBoxLayout(widgets.container);
-    layout->setContentsMargins(8, 6, 8, 6);
-    layout->setSpacing(4);
-
-    widgets.title = new QLabel(summarizeJob(status), widgets.container);
-    widgets.title->setObjectName(QStringLiteral("JobTitle"));
-    layout->addWidget(widgets.title);
-
-    widgets.subtitle = new QLabel(status.detail, widgets.container);
-    widgets.subtitle->setObjectName(QStringLiteral("JobSubtitle"));
-    widgets.subtitle->setWordWrap(true);
-    layout->addWidget(widgets.subtitle);
-
-    widgets.progress = new QProgressBar(widgets.container);
-    widgets.progress->setRange(0, 100);
-    widgets.progress->setTextVisible(true);
-    layout->addWidget(widgets.progress);
-
-    auto* footer = new QHBoxLayout();
-    footer->setContentsMargins(0, 0, 0, 0);
-    footer->setSpacing(8);
-
-    widgets.status = new QLabel(jobStateLabel(status.state), widgets.container);
-    footer->addWidget(widgets.status);
-
-    widgets.eta = new QLabel(jobEtaLabel(status.etaMs), widgets.container);
-    footer->addWidget(widgets.eta, 1);
-
-    widgets.cancel = new QPushButton(tr("Cancel"), widgets.container);
-    footer->addWidget(widgets.cancel);
-    layout->addLayout(footer);
-
-    widgets.container->setLayout(layout);
-
-    widgets.item->setSizeHint(widgets.container->sizeHint());
-    widgets.item->setData(Qt::UserRole, status.id.toString(QUuid::WithoutBraces));
-    m_jobsList->setItemWidget(widgets.item, widgets.container);
-
-    widgets.snapshot = status;
-    m_jobWidgets.insert(status.id, widgets);
-    m_jobLogs[status.id];
-
-    connect(widgets.cancel, &QPushButton::clicked, this, [this, jobId = status.id]() {
-        requestJobCancellation(jobId);
-    });
-
-    onTrainingJobUpdated(status);
-
-    if (m_jobsList->count() == 1)
-    {
-        m_jobsList->setCurrentItem(widgets.item);
-    }
-}
-
-void MainWindow::onTrainingJobUpdated(const train::TrainingManager::JobStatus& status)
-{
-    auto it = m_jobWidgets.find(status.id);
-    if (it == m_jobWidgets.end())
-    {
-        onTrainingJobAdded(status);
-        return;
-    }
-
-    JobWidgets& widgets = it.value();
-    widgets.snapshot = status;
-
-    if (widgets.title)
-    {
-        widgets.title->setText(summarizeJob(status));
-    }
-    if (widgets.subtitle)
-    {
-        widgets.subtitle->setText(status.detail);
-    }
-    if (widgets.progress)
-    {
-        if (status.progress >= 0)
-        {
-            widgets.progress->setFormat(QStringLiteral("%p%"));
-            widgets.progress->setValue(std::clamp(status.progress, 0, 100));
-        }
-        else
-        {
-            widgets.progress->setFormat(jobStateLabel(status.state));
-            widgets.progress->setValue(status.state == train::TrainingManager::JobState::Succeeded ? 100 : 0);
-        }
-    }
-    if (widgets.status)
-    {
-        widgets.status->setText(jobStateLabel(status.state));
-    }
-    if (widgets.eta)
-    {
-        widgets.eta->setText(jobEtaLabel(status.etaMs));
-    }
-    if (widgets.cancel)
-    {
-        const bool cancellable = status.state == train::TrainingManager::JobState::Queued
-                                 || status.state == train::TrainingManager::JobState::Running;
-        widgets.cancel->setEnabled(cancellable);
-    }
-
-    if (m_selectedJob == status.id)
-    {
-        updateJobLogView();
-    }
-}
-
-void MainWindow::onTrainingJobRemoved(const QUuid& id)
-{
-    auto it = m_jobWidgets.find(id);
-    if (it == m_jobWidgets.end())
-    {
-        return;
-    }
-
-    JobWidgets widgets = it.value();
-    m_jobWidgets.remove(id);
-    m_jobLogs.remove(id);
-
-    if (widgets.item)
-    {
-        delete widgets.item;
-    }
-
-    if (m_selectedJob == id)
-    {
-        m_selectedJob = {};
-        updateJobLogView();
-    }
-}
-
-void MainWindow::onTrainingJobLog(const QUuid& id, const QString& text)
-{
-    if (text.isEmpty())
-    {
-        return;
-    }
-
-    QStringList lines = text.split(QRegularExpression(QStringLiteral("[\r\n]+")), Qt::SkipEmptyParts);
-    if (lines.isEmpty())
-    {
-        return;
-    }
-
-    QStringList& buffer = m_jobLogs[id];
-    for (const QString& line : lines)
-    {
-        const QString trimmed = line.trimmed();
-        if (trimmed.isEmpty())
-        {
-            continue;
-        }
-        const QString entry = formatTimestamped(trimmed);
-        buffer.append(entry);
-        if (buffer.size() > 4000)
-        {
-            buffer.removeFirst();
-        }
-        if (m_selectedJob == id && m_jobLog)
-        {
-            m_jobLog->appendPlainText(entry);
-        }
-    }
-}
-
-void MainWindow::onTrainingToast(const QString& message)
-{
-    if (statusBar())
-    {
-        statusBar()->showMessage(message, 6000);
-    }
-    logMessage(message);
-}
-
-void MainWindow::onTrainingModelRegistered(const QString& path)
-{
-    refreshAiModels();
-    if (!path.isEmpty())
-    {
-        setActiveAiModel(QDir::toNativeSeparators(path), true);
-        updateTrainingActions();
-        if (statusBar())
-        {
-            statusBar()->showMessage(tr("Loaded new model: %1").arg(QFileInfo(path).fileName()), 6000);
-        }
-    }
-}
-
-void MainWindow::onJobSelectionChanged()
-{
-    if (!m_jobsList)
-    {
-        return;
-    }
-
-    const QListWidgetItem* item = m_jobsList->currentItem();
-    if (!item)
-    {
-        m_selectedJob = {};
-        if (m_jobSelectionLabel)
-        {
-            m_jobSelectionLabel->setText(tr("Select a job to view logs."));
-        }
-        updateJobLogView();
-        return;
-    }
-
-    const QUuid id(item->data(Qt::UserRole).toString());
-    m_selectedJob = id;
-
-    if (m_jobSelectionLabel)
-    {
-        auto it = m_jobWidgets.find(id);
-        const QString title = (it != m_jobWidgets.end()) ? summarizeJob(it.value().snapshot)
-                                                          : tr("Job");
-        m_jobSelectionLabel->setText(tr("Logs � %1").arg(title));
-    }
-
-    updateJobLogView();
-}
-
-void MainWindow::updateJobLogView()
-{
-    if (!m_jobLog)
-    {
-        return;
-    }
-
-    m_jobLog->clear();
-    if (m_selectedJob.isNull())
-    {
-        return;
-    }
-
-    const QStringList logs = m_jobLogs.value(m_selectedJob);
-    if (logs.isEmpty())
-    {
-        return;
-    }
-
-    for (const QString& line : logs)
-    {
-        m_jobLog->appendPlainText(line);
-    }
-}
-
-void MainWindow::requestJobCancellation(const QUuid& id)
-{
-    if (!m_trainingManager)
-    {
-        return;
-    }
-    m_trainingManager->cancelJob(id);
-}
-
-QString MainWindow::summarizeJob(const train::TrainingManager::JobStatus& status) const
-{
-    return QStringLiteral("%1 � %2").arg(jobTypeLabel(status.type), status.label);
-}
-
-QString MainWindow::jobStateLabel(train::TrainingManager::JobState state) const
-{
-    switch (state)
-    {
-    case train::TrainingManager::JobState::Queued:
-        return tr("Queued");
-    case train::TrainingManager::JobState::Running:
-        return tr("Running");
-    case train::TrainingManager::JobState::Succeeded:
-        return tr("Done");
-    case train::TrainingManager::JobState::Failed:
-        return tr("Failed");
-    case train::TrainingManager::JobState::Cancelled:
-        return tr("Cancelled");
-    }
-    return tr("Unknown");
-}
-
-QString MainWindow::jobEtaLabel(qint64 etaMs) const
-{
-    if (etaMs < 0)
-    {
-        return tr("ETA --");
-    }
-    if (etaMs == 0)
-    {
-        return tr("ETA 00:00");
-    }
-
-    const qint64 totalSeconds = (etaMs + 500) / 1000;
-    const qint64 minutes = totalSeconds / 60;
-    const qint64 seconds = totalSeconds % 60;
-    if (minutes >= 60)
-    {
-        const qint64 hours = minutes / 60;
-        const qint64 remMinutes = minutes % 60;
-        return tr("ETA %1h %2m").arg(hours).arg(remMinutes, 2, 10, QLatin1Char('0'));
-    }
-    return tr("ETA %1:%2").arg(minutes, 2, 10, QLatin1Char('0')).arg(seconds, 2, 10, QLatin1Char('0'));
-}
-
-QString MainWindow::jobTypeLabel(train::TrainingManager::JobType type) const
-{
-    switch (type)
-    {
-    case train::TrainingManager::JobType::SyntheticDataset:
-        return tr("Synthetic Data");
-    case train::TrainingManager::JobType::Train:
-        return tr("Training");
-    case train::TrainingManager::JobType::FineTune:
-        return tr("Fine-Tune");
-    }
-    return tr("Job");
-}    params.enableFinishPass = finishEnabled;
-    params.stockAllowance_mm = std::max(0.0, m_stockAllowanceMm);
-    params.rampAngleDeg = std::clamp(m_rampAngleDeg, 0.5, 45.0);
-}
-
 void MainWindow::updateStockDerivedFromModel()
 {
     if (m_stockOriginMode == StockOriginMode::Custom)
@@ -2115,8 +1162,6 @@ void MainWindow::refreshAiModels()
     {
         m_modelManager = std::make_unique<ai::ModelManager>();
     }
-
-    ensureTrainingManager();
 
     if (!m_aiModelCombo)
     {
@@ -2521,7 +1566,6 @@ bool MainWindow::setActiveAiModel(const QString& path, bool quiet)
     }
 
     updateActiveAiSummary();
-    updateTrainingActions();
 
     if (!quiet)
     {
@@ -2950,7 +1994,6 @@ void MainWindow::applyUnits(common::Unit unit, bool fromSettings)
 
     syncStockUiFromData();
     syncMachineUiFromData();
-    updatePassControlUnits();
 
     if (!fromSettings)
     {
@@ -2995,17 +2038,6 @@ void MainWindow::loadSettings()
         }
     }
 
-    m_enableRoughPassUser = settings.value(QStringLiteral("params/roughPassEnabled"), params.enableRoughPass).toBool();
-    m_enableFinishPassUser = settings.value(QStringLiteral("params/finishPassEnabled"), params.enableFinishPass).toBool();
-    m_stockAllowanceMm = settings.value(QStringLiteral("params/stockAllowanceMm"), params.stockAllowance_mm).toDouble();
-    m_rampAngleDeg = settings.value(QStringLiteral("params/rampAngleDeg"), params.rampAngleDeg).toDouble();
-    m_stockAllowanceMm = std::max(0.0, m_stockAllowanceMm);
-    m_rampAngleDeg = std::clamp(m_rampAngleDeg, 0.5, 45.0);
-    params.enableRoughPass = m_enableRoughPassUser;
-    params.enableFinishPass = m_enableFinishPassUser;
-    params.stockAllowance_mm = m_stockAllowanceMm;
-    params.rampAngleDeg = m_rampAngleDeg;
-
     const int originModeValue = settings.value(QStringLiteral("stock/originMode"), static_cast<int>(m_stockOriginMode)).toInt();
     m_stockOriginMode = static_cast<StockOriginMode>(std::clamp(originModeValue, 0, 2));
     m_stock.margin_mm = settings.value(QStringLiteral("stock/marginMm"), m_stock.margin_mm).toDouble();
@@ -3032,8 +2064,6 @@ void MainWindow::loadSettings()
         m_toolpathSettings->setSelectedToolId(toolId, false);
     }
     m_toolpathSettings->setParameters(params);
-    syncPassControlsFromData();
-    updatePassControlUnits();
     m_loadingSettings = false;
 
     if (m_stockOriginMode != StockOriginMode::Custom)
@@ -3045,28 +2075,7 @@ void MainWindow::loadSettings()
 
     m_lastModelDirectory = settings.value(QStringLiteral("paths/lastModelDir")).toString();
     m_currentModelPath = settings.value(QStringLiteral("paths/lastModel")).toString();
-
-
-    const bool envReady = settings.value(QStringLiteral("training/envReady"), false).toBool();
-    m_envReady = envReady;
-    const bool cpuOnly = settings.value(QStringLiteral("training/cpuOnly"),
-                                        m_envManager ? m_envManager->cpuOnly() : false)
-                             .toBool();
-    if (m_envProgress)
-    {
-        m_envProgress->setValue(envReady ? 100 : 0);
-    }
-    if (m_envCpuOnlyCheck)
-    {
-        QSignalBlocker blocker(m_envCpuOnlyCheck);
-        m_envCpuOnlyCheck->setChecked(cpuOnly);
-    }
-    if (m_envManager)
-    {
-        m_envManager->setCpuOnly(cpuOnly);
-        onGpuInfoChanged(m_envManager->gpuSummary());
-    }
-    updateTrainingActions();
+}
 
 void MainWindow::saveSettings() const
 {
@@ -3119,10 +2128,6 @@ void MainWindow::saveSettings() const
     settings.setValue(QStringLiteral("paths/lastModel"), m_currentModelPath);
     settings.setValue(QStringLiteral("ai/modelPath"), m_aiModelPath);
     settings.setValue(QStringLiteral("ai/forceCpu"), m_forceCpuInference);
-    if (m_envCpuOnlyCheck)
-    {
-        settings.setValue(QStringLiteral("training/cpuOnly"), m_envCpuOnlyCheck->isChecked());
-    }
 }
 
 void MainWindow::onToolSelected(const QString& toolId)
@@ -3571,30 +2576,6 @@ void MainWindow::displayToolpathMessage(const QString& text)
 }
 
 } // namespace app
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
