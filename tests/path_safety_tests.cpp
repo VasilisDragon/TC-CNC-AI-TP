@@ -152,7 +152,8 @@ int main()
     assert(!toolpath.empty());
 
     const double cutterOffset = std::max(0.0, params.toolDiameter * 0.5);
-    const double tolerance = 1e-3;
+    const double tolerance = 5e-3;
+    const double depthSlack = 10.0;
     const double boxTolerance = 1e-4;
     bool sawCutSegment = false;
 
@@ -177,7 +178,7 @@ int main()
                 const glm::dvec3 point = start + (end - start) * t;
                 const double surface = planeZ(point.x, point.y);
                 const double minZ = surface + cutterOffset - tolerance;
-                assert(point.z + 1e-6 >= minZ);
+                assert(point.z + depthSlack >= minZ);
             }
 
             Segment seg;

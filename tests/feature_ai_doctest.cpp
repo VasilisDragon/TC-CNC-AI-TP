@@ -1,3 +1,4 @@
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest/doctest.h"
 
 #include "ai/FeatureExtractor.h"
@@ -57,12 +58,12 @@ TEST_CASE("TorchAI falls back when features invalid")
     render::Model emptyModel;
     tp::UserParams params;
     params.stepOver = 2.0;
-    ai::TorchAI ai(std::filesystem::path());
+    ai::TorchAI torchAi{std::filesystem::path{}};
 
-    const ai::StrategyDecision decision = ai.predict(emptyModel, params);
+    const ai::StrategyDecision decision = torchAi.predict(emptyModel, params);
     CHECK(decision.strat == ai::StrategyDecision::Strategy::Raster);
     CHECK(decision.stepOverMM == doctest::Approx(params.stepOver));
-    CHECK_FALSE(ai.lastError().empty());
+    CHECK_FALSE(torchAi.lastError().empty());
 }
 
 TEST_CASE("OnnxAI falls back when features invalid")
@@ -70,12 +71,12 @@ TEST_CASE("OnnxAI falls back when features invalid")
     render::Model emptyModel;
     tp::UserParams params;
     params.stepOver = 1.5;
-    ai::OnnxAI ai(std::filesystem::path());
+    ai::OnnxAI onnxAi{std::filesystem::path{}};
 
-    const ai::StrategyDecision decision = ai.predict(emptyModel, params);
+    const ai::StrategyDecision decision = onnxAi.predict(emptyModel, params);
     CHECK(decision.strat == ai::StrategyDecision::Strategy::Raster);
     CHECK(decision.stepOverMM == doctest::Approx(params.stepOver));
-    CHECK_FALSE(ai.lastError().empty());
+    CHECK_FALSE(onnxAi.lastError().empty());
 }
 
 TEST_CASE("GRBLPost emits feed, unit, and tool moves")
@@ -103,7 +104,7 @@ TEST_CASE("GRBLPost emits feed, unit, and tool moves")
     params.stock = toolpath.stock;
 
     tp::GRBLPost post;
-    const std::string gcode = post.emit(toolpath, common::Unit::Millimeters, params);
+    const std::string gcode = post.generate(toolpath, common::Unit::Millimeters, params);
 
     CHECK(gcode.find("G21") != std::string::npos); // metric units
     CHECK(gcode.find("F900.000") != std::string::npos);

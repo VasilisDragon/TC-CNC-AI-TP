@@ -5,7 +5,7 @@ their corresponding triangulated meshes, and strategy labels useful for
 bootstrapping AI-driven CAM research.
 
 > **Usage & Licensing**  
-> © 2025 CNCTC contributors. The scripts are licensed alongside the main project (refer to `LICENSE.txt`). Generated artefacts embed the same provenance watermark used by the desktop exporter—do not remove or obscure it if you intend to stay in good standing with the license.
+> (c) 2025 CNCTC contributors. The scripts are licensed alongside the main project (refer to `LICENSE.txt`). Generated artefacts embed the same provenance watermark used by the desktop exporter-do not remove or obscure it if you intend to stay in good standing with the license.
 
 ## Requirements
 
@@ -20,9 +20,9 @@ pip install -r train/requirements.txt
 
 Key packages:
 
-* **CadQuery** `2.3.1` — parametric solid modelling used to author randomized stock.
-* **NumPy** `1.26.4` — random sampling, numeric helpers.
-* **trimesh** `4.2.3` — STL I/O and bounding-box calculations.
+* **CadQuery** `2.3.1` - parametric solid modelling used to author randomized stock.
+* **NumPy** `1.26.4` - random sampling, numeric helpers.
+* **trimesh** `4.2.3` - STL I/O and bounding-box calculations.
 
 ## Generator usage
 
@@ -41,8 +41,8 @@ Each sample directory contains:
 
 ```
 sample_0001/
-  ├── mesh.stl          # triangulated CadQuery export in millimetres
-  └── meta.json         # metadata contract described below
+  |-  mesh.stl          # triangulated CadQuery export in millimetres
+  \-  meta.json         # metadata contract described below
 ```
 
 The metadata schema follows the project contract:
@@ -64,7 +64,7 @@ The metadata schema follows the project contract:
 
 For every sample the generator:
 
-1. Builds a rectangular stock (60–140 mm × 40–110 mm × 15–60 mm).
+1. Builds a rectangular stock (60-140 mm x 40-110 mm x 15-60 mm).
 2. Applies a random sequence of features (rectangular and circular pockets,
    raised bosses, vertical fillets, and chamfers) using CadQuery.
 3. Exports the solid as `mesh.stl` with moderate tessellation tolerances.

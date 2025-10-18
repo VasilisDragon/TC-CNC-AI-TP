@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.21)
 
 project(AIToolpathGenerator VERSION 0.1.0 LANGUAGES CXX)
 
@@ -166,6 +166,7 @@ if (BUILD_TESTING)
     target_link_libraries(basic_sanity_tests
         PRIVATE
             common
+            tp
     )
 
     add_executable(path_safety_tests
