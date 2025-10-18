@@ -4,6 +4,9 @@ The `train/` package generates small machining datasets composed of CAD solids,
 their corresponding triangulated meshes, and strategy labels useful for
 bootstrapping AI-driven CAM research.
 
+> **Usage & Licensing**  
+> © 2025 CNCTC contributors. The scripts are licensed alongside the main project (refer to `LICENSE.txt`). Generated artefacts embed the same provenance watermark used by the desktop exporter—do not remove or obscure it if you intend to stay in good standing with the license.
+
 ## Requirements
 
 Create a clean Python environment (3.10 or newer is recommended) and install the
