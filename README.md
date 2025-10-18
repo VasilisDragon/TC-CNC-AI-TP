@@ -1,6 +1,13 @@
-# CNCTC
+﻿# CNCTC
 
 CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop client with a modular toolpath and AI stack. The application ingests triangle meshes, extracts geometric descriptors, and blends heuristics with TorchScript/ONNX models to recommend machining strategies in real time.
+
+## Usage & Licensing
+
+- © 2025 CNCTC contributors. Redistribution, modification, and commercial use require a valid CNCTC license agreement. By using the binaries or source you agree not to strip or tamper with embedded provenance markers.
+- Toolpaths exported by the desktop application include a machine-safe provenance footer. It preserves machining behaviour while allowing a neutral party to attest to a file’s origin if that ever becomes a contractual dispute.
+- Verification tooling ships only to licensed users upon request and is not part of the public bundle. Keep any forensic utilities in a private workspace alongside your legal paperwork.
+- If you need a bespoke license (e.g., OEM redistribution), reach out via the contacts listed in `LICENSE.txt`. Getting ghosted mid-contract doesn't magically erase the provenance tag.
 
 ## Architecture At-A-Glance
 
@@ -39,91 +46,108 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
 - Root configuration:
   - `CMakeLists.txt`, `CMakePresets.json`, `BUILD.md`, `vcpkg.json`, and `LICENSE.txt` control the build and dependency graph.
 
-## Build & Run (Desktop App)
+## Build, Run, and Ship Without Drama
 
-1. **Install prerequisites**
+1. **Install prerequisites — no vibes without deps**
    - CMake ≥ 3.22, Ninja or an MSVC/Clang generator, and Qt 6.5+ with Widgets/OpenGL modules.
-   - Optional backends: LibTorch (for TorchScript inference), ONNX Runtime (for ONNX inference), and OpenCAMLib if you plan to enable OpenCL drop-cutter.
-   - The repository ships with a `vcpkg.json`; configure `VCPKG_ROOT` or integrate via your toolchain file if you prefer vcpkg.
+   - Optional backends: LibTorch (TorchScript inference), ONNX Runtime (ONNX inference), OpenCAMLib (OpenCL drop-cutter). The app auto-detects GPU support and exposes it in AI Preferences so you can flip between “Auto (GPU when available)” and “CPU only” without guessing.
+   - vcpkg is already wired through cpkg.json. Set VCPKG_ROOT or let the preset toolchain take it from there.
 
 2. **Configure**
-   ```bash
+   `ash
    cmake --preset ninja-release
-   ```
-   Adjust the preset or generator (e.g., `ninja-debug`, `visual-studio`) and pass `-DWITH_TORCH=ON`, `-DWITH_ONNXRUNTIME=ON`, or `-DWITH_OCL=ON` as needed. The optional modules expect their SDKs on `PATH`/`CMAKE_PREFIX_PATH`.
+   `
+   Swap to 
+inja-debug, uild-vs-release, or your own preset. Enable optional stacks with -DWITH_TORCH=ON, -DWITH_ONNXRUNTIME=ON, or -DWITH_OCL=ON. Double-check CMAKE_PREFIX_PATH; mis-pointed SDKs are a jump-scare no one deserves.
 
 3. **Build**
-   ```bash
+   `ash
    cmake --build --preset ninja-release
-   ```
+   `
 
 4. **Run**
-   Launch the produced `cnctc` executable. The app will prompt for model directories, tool libraries (`resources/tools.json`), and provides dialogs for training, synthetic data generation, and AI runtime preferences.
+   Launch the produced executable (AIToolpathGenerator.exe on Windows). First-time checklist:
+   - File → **Open Sample Part** to load samples/sample_part.stl instantly.
+   - File → **Generate Demo Toolpath** to spawn a ready-to-simulate cut using the current settings.
+   - **AI → Preferences…** to confirm the active model, device, and run a latency sanity-check. The dialog now offers “Auto (GPU when available)” so CUDA can flex when it’s around and chill when it’s not.
+
+5. **Package (one-liner installer)**
+   `ash
+   cmake --build --preset build-vs-release --target package
+   `
+   With NSIS on the PATH (makensis), CPack emits AIToolpathGenerator-<version>-win64.exe. Hand that single file to teammates and everyone installs the exact same stack. Low effort, high serotonin.
 
 ## Training & Data Generation
 
-- `src/train/EnvManager` prepares an isolated Python runtime. Embedded Python downloads are now streamed directly to disk, abort cleanly if you cancel, and can be hash-checked before extraction.
-- Inside the GUI you can trigger environment preparation, synthetic dataset generation, or model training jobs; `TrainingManager` manages background `QProcess` instances and surfaces stdout/stderr in the console dock.
-- Command-line usage mirrors the GUI:
-  ```bash
+- The **Training Environment** dock fronts 	rain::EnvManager: download embedded Python, verify SHA-256, hydrate a venv, install 
+equirements.txt, and stream logs. Cancel actually cancels, so rage-quitting hotel Wi-Fi is officially supported.
+- The **Training** menu now includes:
+  - **Prepare Environment** — bootstrap or repair the runtime.
+  - **Generate Synthetic Data…** — slider-driven wizard feeding TrainingSyntheticDataDialog.
+  - **New Model…** — launches TrainingNewModelDialog with device preference (Auto GPU or CPU-only), dataset path, epochs, learning rate, and the v2 feature toggle.
+  - **Fine-Tune Current Model…** — locks to the active inference model, prompts for dataset + hyperparameters, and queues a fine-tune job.
+  - **Open Models/Datasets Folder** — jump directly to runtime directories.
+- The **Training Jobs** dock lists every job with title, status, ETA, progress bar, and Cancel button. Selecting a job streams raw stdout/stderr into the lower pane, so you can read Python logs without spelunking %LOCALAPPDATA% at 2 a.m.
+- Command-line automation stays identical:
+  `ash
   python -m venv .venv
   .\.venv\Scripts\activate  # or source .venv/bin/activate
   pip install -r train/requirements.txt
   python train/generate_synthetic.py --out datasets/demo --n 256
   python train/train_strategy.py --output-dir models --epochs 40 --device cpu --v2-features
   python train/make_fixed_model.py --output models/fixed_test.pt
-  ```
-- `new_generate_synthetic.py` and `old_generate_synthetic.py` are retained as reference revisions when iterating on dataset heuristics.
+  `
+  Both 
+ew_generate_synthetic.py and old_generate_synthetic.py remain for reproducibility and regression testing.
 
 ## Models & Runtime AI
 
-- `models/` hosts TorchScript (`.pt`) and ONNX (`.onnx`) artefacts plus companion schema/model-card JSON. Load your own models by dropping them here; `ModelManager` indexes the directory at startup.
-- `FeatureExtractor` (`src/ai/FeatureExtractor.*`) produces global metrics: bounding boxes, slope histograms, curvature, pocket depth, and appends user tool parameters before inference. Feature vectors are padded/truncated automatically to match model expectations.
-- `TorchAI` and `OnnxAI` share a common fallback strategy, gracefully downgrade to CPU, capture latency metrics, and emit warning banners when artefacts misbehave.
-- `TorchAI` logs a single feature preview per session to aid debugging; disable or redact application logs if those values are sensitive for your deployment.
+- Drop TorchScript (.pt) or ONNX (.onnx) artefacts into models/. ModelManager refreshes the combo, and the Training Jobs dock auto-registers new models once a job succeeds.
+- FeatureExtractor computes bounding boxes, slope histograms, curvature, pocket depth, and appends tool parameters before inference. Feature vectors auto pad/truncate—manual tensor carpentry is cancelled.
+- TorchAI and OnnxAI expose latency, last-error messages, and GPU availability. They gracefully downgrade to CPU when CUDA providers are absent and keep the UI honest.
+- Feature previews log once per session; redact console output if geometry-derived numbers are regulated where you deploy.
 
 ## Testing
 
-1. Configure a build as above (debug presets speed up unit testing).
-2. Build and run the tests:
-   ```bash
+1. Configure a debug build (linking is faster).
+2. Run:
+   `ash
    cmake --build --preset ninja-debug --target tests
    ctest --preset ninja-debug --output-on-failure
-   ```
-   The suite covers importer sanity checks, Torch/ONNX inference, toolpath geometry, and regression fixtures under `tests/`.
+   `
+   Coverage spans importer sanity checks, Torch/ONNX inference, toolpath kernels, and Python orchestration. Skipping tests is basically tweeting “I enjoy shipping gremlins.”
 
 ## Documentation & Utilities
 
-- `BUILD.md`, `docs/BUILD_DOCTOR.md`, and `docs/OCL_WINDOWS.md` expand on build generator specifics, environment troubleshooting, and optional OpenCL integration.
-- `docs/QA_CHECKLIST.md`, `docs/TESTING.md`, and the `docs/SMOKE_P*.md` series capture manual validation flows.
-- `resources/tools.json` seeds the `ToolpathSettingsWidget` list; edit it or point the UI at your own JSON.
-- `samples/sample_part.stl` gives the viewer an immediate mesh to explore.
-- `scripts/verify_env.ps1` validates MSVC, CMake, Ninja, and Qt hints on Windows shells.
+- BUILD.md, docs/BUILD_DOCTOR.md, docs/OCL_WINDOWS.md — expanded build instructions and troubleshooting.
+- docs/QA_CHECKLIST.md, docs/TESTING.md, docs/SMOKE_P*.md — manual QA flows.
+- docs/TRAINING_GUI.md — updated walkthrough of the Training menu, environment dock, and jobs panel (now with GPU detection call-outs).
+- 
+esources/tools.json — default tool library for the Toolpath Settings widget.
+- samples/sample_part.stl — fast-track demo mesh.
+- scripts/verify_env.ps1 — PowerShell helper for MSVC, Qt, CMake, Ninja, LibTorch/ONNX sanity checks.
 
 ## Security & Data Handling Notes
 
-- Treat everything in `models/` as executable code: verify hashes, control provenance, and prefer signed artefacts for distribution.
-- The embedded Python bootstrap now writes the archive incrementally, but it still downloads from the public Python CDN. Capture the expected SHA-256 out of band and compare before trusting the environment in high-assurance contexts.
-- `io::ModelImporter` (OBJ/STL via Assimp) trusts client-supplied meshes. Vet untrusted CAD files for size and malicious constructs to avoid memory exhaustion or processing spikes.
-- Feature previews sent to the log (`TorchAI::logFeaturePreview`) contain the first few normalized values. Disable logging or filter stdout/stderr if product environments must avoid leaking geometry metadata.
-- Keep third-party dependencies (Qt, LibTorch, ONNX Runtime, CadQuery, build123d, trimesh, etc.) patched to pick up CVEs.
-- Verify large artefacts (models, embedded Python zip) before trusting them. For example:
-  ```powershell
+- Treat everything in models/ as executable. Verify checksums, control provenance, and prefer signed artefacts.
+- Embedded Python downloads stream to disk; verify SHA-256 before extraction:
+  `powershell
   certutil -hashfile python-3.11.5-embed-amd64.zip SHA256
-  ```
-  or on POSIX shells:
-  ```bash
+  `
+  `ash
   shasum -a 256 python-3.11.5-embed-amd64.zip
-  ```
-  Compare the result with the published checksum before proceeding.
+  `
+- io::ModelImporter trusts incoming meshes—screen untrusted CAD for size and intent.
+- Keep third-party dependencies (Qt, LibTorch, ONNX Runtime, CadQuery, build123d, trimesh, etc.) patched. Zero-day roulette is not a personality.
+- Disable feature previews or redact logs if they could leak geometry-derived metrics.
 
 ## Roadmap Ideas
 
 - Replay recorded spindle/axis telemetry to evaluate AI decisions against real machine sessions.
-- Extend the feature vector with curvature histograms, material codes, or tool families once the data pipeline can surface them reliably.
-- Add CI coverage that loads TorchScript/ONNX artefacts, validates schema JSON, and runs a representative toolpath through the simulator.
-- Experiment with spatial acceleration structures in `OclAdapter::rasterDropCutter` to accelerate dense models without sacrificing accuracy.
+- Extend feature vectors with curvature histograms, material codes, or tool families once pipelines can surface them reliably.
+- Add CI coverage that loads TorchScript/ONNX artefacts, validates schema JSON, and runs representative toolpaths through the simulator.
+- Experiment with spatial acceleration structures in OclAdapter::rasterDropCutter to accelerate dense models without sacrificing accuracy.
 
 ## Special Note
 
-Thank you for pushing CNCTC forward. Here’s to keeping the project extraordinary, inorbinantly performant, and joyfully out of the box.
+Thank you for pushing CNCTC forward. Here’s to keeping the project extraordinary, unapologetically performant, and just the right amount of chaotic good.

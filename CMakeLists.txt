@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+﻿cmake_minimum_required(VERSION 3.21)
 
 project(AIToolpathGenerator VERSION 0.1.0 LANGUAGES CXX)
 
@@ -241,6 +241,67 @@ if (TARGET assimp::assimp)
     endif()
 endif()
 
+set(_vcpkg_runtime_search_paths "")
+if (CMAKE_BINARY_DIR)
+    list(APPEND _vcpkg_runtime_search_paths
+        "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin"
+        "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/bin")
+endif()
+if (DEFINED VCPKG_INSTALLED_DIR)
+    list(APPEND _vcpkg_runtime_search_paths
+        "${VCPKG_INSTALLED_DIR}/x64-windows/bin"
+        "${VCPKG_INSTALLED_DIR}/x64-windows/debug/bin")
+endif()
+
+set(_third_party_runtime_dlls
+    "brotlicommon.dll"
+    "brotlidec.dll"
+    "brotlienc.dll"
+    "bz2.dll"
+    "double-conversion.dll"
+    "freetype.dll"
+    "harfbuzz.dll"
+    "kubazip.dll"
+    "libpng16.dll"
+    "minizip.dll"
+    "pcre2-16.dll"
+    "poly2tri.dll"
+    "pugixml.dll"
+    "zlib1.dll"
+    "zstd.dll"
+)
+
+foreach(_dll_name IN LISTS _third_party_runtime_dlls)
+    string(REPLACE "." "_" _dll_cache_key "${_dll_name}")
+    string(REPLACE "-" "_" _dll_cache_key "${_dll_cache_key}")
+    string(TOUPPER "${_dll_cache_key}" _dll_cache_key)
+    set(_dll_cache_var "CNCTC_RUNTIME_${_dll_cache_key}")
+    unset(${_dll_cache_var} CACHE)
+    if (_vcpkg_runtime_search_paths)
+        find_file(${_dll_cache_var}
+            NAMES "${_dll_name}"
+            PATHS ${_vcpkg_runtime_search_paths}
+            NO_DEFAULT_PATH)
+    endif()
+    if (NOT ${_dll_cache_var})
+        find_file(${_dll_cache_var} NAMES "${_dll_name}")
+    endif()
+    if (${_dll_cache_var})
+        get_filename_component(_dll_found_dir "${${_dll_cache_var}}" DIRECTORY)
+        if (_dll_found_dir MATCHES "/debug/bin$" OR _dll_found_dir MATCHES "\\\\debug\\\\bin$")
+            get_filename_component(_dll_found_parent "${_dll_found_dir}" DIRECTORY)
+            get_filename_component(_dll_found_grand "${_dll_found_parent}" DIRECTORY)
+            if (EXISTS "${_dll_found_grand}/bin/${_dll_name}")
+                list(APPEND EXTRA_RUNTIME_DLLS "${_dll_found_grand}/bin/${_dll_name}")
+            else()
+                list(APPEND EXTRA_RUNTIME_DLLS "${${_dll_cache_var}}")
+            endif()
+        else()
+            list(APPEND EXTRA_RUNTIME_DLLS "${${_dll_cache_var}}")
+        endif()
+    endif()
+endforeach()
+
 if (AI_ONNX_ENABLED AND TARGET onnxruntime::onnxruntime)
     get_target_property(ONNX_SHARED_LOCATION onnxruntime::onnxruntime IMPORTED_LOCATION_RELEASE)
     if (NOT ONNX_SHARED_LOCATION)
@@ -287,5 +348,20 @@ set(CPACK_NSIS_EXECUTABLES_DIRECTORY "${CMAKE_INSTALL_BINDIR}")
 set(CPACK_PACKAGE_EXECUTABLES "AIToolpathGenerator" "AIToolpathGenerator")
 set(CPACK_CREATE_DESKTOP_LINKS "AIToolpathGenerator")
 set(CPACK_NSIS_MUI_FINISHPAGE_RUN "${CMAKE_INSTALL_BINDIR}/AIToolpathGenerator.exe")
+
+# Try to locate the NSIS compiler automatically so the `package` target can run unattended.
+find_program(CPACK_NSIS_EXECUTABLE
+    NAMES makensis makensis.exe
+    HINTS
+        ENV NSIS_ROOT
+        "C:/Program Files/NSIS"
+        "C:/Program Files (x86)/NSIS"
+    PATH_SUFFIXES bin
+)
+if (CPACK_NSIS_EXECUTABLE)
+    message(STATUS "NSIS (makensis) detected at: ${CPACK_NSIS_EXECUTABLE}")
+else()
+    message(WARNING "NSIS (makensis) not found. Install NSIS or set NSIS_ROOT to enable the installer packaging target.")
+endif()
 
 include(CPack)
