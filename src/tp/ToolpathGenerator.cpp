@@ -4,6 +4,7 @@
 #include "render/Model.h"
 #include "tp/heightfield/HeightField.h"
 #include "tp/heightfield/UniformGrid.h"
+#include "tp/GougeChecker.h"
 #include "tp/ocl/OclAdapter.h"
 #include "tp/waterline/ZSlicer.h"
 
@@ -945,6 +946,7 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
         haveSeed = true;
     }
 
+    applyLeaveStockAdjustment(aggregated, model, params);
     finalizeToolpath(aggregated, params);
 
     if (progressCallback)
@@ -1446,6 +1448,51 @@ Toolpath ToolpathGenerator::generateFallbackRaster(const render::Model& model,
     }
 
     return toolpath;
+}
+
+void ToolpathGenerator::applyLeaveStockAdjustment(Toolpath& toolpath,
+                                                  const render::Model& model,
+                                                  const UserParams& params) const
+{
+    if (toolpath.passes.empty() || params.leaveStock_mm <= 1e-6)
+    {
+        return;
+    }
+
+    GougeChecker checker(model);
+
+    for (Polyline& poly : toolpath.passes)
+    {
+        if (poly.motion != MotionType::Cut || poly.pts.size() < 2)
+        {
+            continue;
+        }
+
+        for (Vertex& vertex : poly.pts)
+        {
+            GougeChecker::Vec3 sample = vertex.p;
+            sample.z = static_cast<float>(params.stock.topZ_mm + 1.0);
+            const auto surfaceZOpt = checker.surfaceHeightAt(sample);
+            if (!surfaceZOpt)
+            {
+                continue;
+            }
+
+            double desiredZ = *surfaceZOpt + params.leaveStock_mm;
+            if (params.machine.safeZ_mm > 0.0)
+            {
+                desiredZ = std::min(desiredZ, params.machine.safeZ_mm);
+            }
+
+            const double currentZ = static_cast<double>(vertex.p.z);
+            if (desiredZ <= currentZ + 1e-6)
+            {
+                continue;
+            }
+
+            vertex.p.z = static_cast<float>(desiredZ);
+        }
+    }
 }
 
 } // namespace tp

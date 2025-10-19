@@ -791,7 +791,7 @@ bool TrainingManager::ensureEnvironmentReady(const QString& actionLabel)
     if (!settings.value(QStringLiteral("training/envReady"), false).toBool())
     {
         emit toastRequested(
-            tr("Training environment is not ready. Run “Prepare Environment” before %1.").arg(actionLabel));
+            tr("Training environment is not ready. Run \"Prepare Environment\" before %1.").arg(actionLabel));
         return false;
     }
 

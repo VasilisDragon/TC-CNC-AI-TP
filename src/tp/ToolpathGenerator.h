@@ -33,6 +33,7 @@ struct UserParams
     bool enableRoughPass{true};
     bool enableFinishPass{true};
     double stockAllowance_mm{0.3};
+    double leaveStock_mm{0.3};
     double rampAngleDeg{3.0};
     bool useHeightField{true};
     CutterType cutterType{CutterType::FlatEndmill};
@@ -95,6 +96,7 @@ private:
                                     const PassProfile& profile,
                                     const std::atomic<bool>& cancelFlag,
                                     const std::function<void(int)>& progressCallback) const;
+    void applyLeaveStockAdjustment(Toolpath& toolpath, const render::Model& model, const UserParams& params) const;
 };
 
 } // namespace tp

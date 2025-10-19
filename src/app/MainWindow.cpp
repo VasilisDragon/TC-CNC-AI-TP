@@ -662,7 +662,7 @@ bool MainWindow::isGpuAvailableForTraining() const
 void MainWindow::updateTrainingActions()
 {
     const bool envBusy = m_envManager && m_envManager->isBusy();
-    const bool allowTraining = m_envReady && !envBusy;
+    const bool allowTraining = !envBusy;
 
     if (m_trainingNewModelAction)
     {

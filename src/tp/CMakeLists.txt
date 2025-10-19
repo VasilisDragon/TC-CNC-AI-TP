@@ -2,6 +2,8 @@ add_library(tp STATIC
     Toolpath.h
     ToolpathGenerator.h
     ToolpathGenerator.cpp
+    GougeChecker.h
+    GougeChecker.cpp
     Machine.h
     Machine.cpp
     GenerateWorker.h
