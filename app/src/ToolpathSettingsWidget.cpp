@@ -105,6 +105,42 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
     m_useHeightField->setToolTip(tr("Build a sampled height field when OpenCL acceleration is unavailable."));
     form->addRow(tr("HeightField"), m_useHeightField);
 
+    m_enableRamp = new QCheckBox(tr("Ramp entries"), this);
+    m_enableRamp->setToolTip(tr("When enabled, replace plunges with linear ramps using the angle below."));
+    form->addRow(tr("Ramp Entry"), m_enableRamp);
+
+    m_rampAngle = new QDoubleSpinBox(this);
+    m_rampAngle->setDecimals(1);
+    m_rampAngle->setRange(0.5, 45.0);
+    m_rampAngle->setSingleStep(0.5);
+    m_rampAngle->setToolTip(tr("Ramp angle in degrees (smaller angles ramp further away but reduce chip load spikes)."));
+    form->addRow(tr("Ramp Angle"), m_rampAngle);
+
+    m_enableHelical = new QCheckBox(tr("Helical entries"), this);
+    m_enableHelical->setToolTip(tr("Attempt to generate a segmented helix when stepdown is required."));
+    form->addRow(tr("Helical Entry"), m_enableHelical);
+
+    m_rampRadius = new QDoubleSpinBox(this);
+    m_rampRadius->setDecimals(2);
+    m_rampRadius->setToolTip(tr("Approximate helix radius measured in the cutting plane."));
+    form->addRow(tr("Helix Radius"), m_rampRadius);
+
+    m_leadIn = new QDoubleSpinBox(this);
+    m_leadIn->setDecimals(2);
+    m_leadIn->setToolTip(tr("Length of the tangent lead-in segment before each cutting move."));
+    form->addRow(tr("Lead-in Length"), m_leadIn);
+
+    m_leadOut = new QDoubleSpinBox(this);
+    m_leadOut->setDecimals(2);
+    m_leadOut->setToolTip(tr("Length of the tangent lead-out segment after each cutting move."));
+    form->addRow(tr("Lead-out Length"), m_leadOut);
+
+    m_cutDirection = new QComboBox(this);
+    m_cutDirection->addItem(tr("Climb"), QVariant::fromValue(static_cast<int>(tp::UserParams::CutDirection::Climb)));
+    m_cutDirection->addItem(tr("Conventional"), QVariant::fromValue(static_cast<int>(tp::UserParams::CutDirection::Conventional)));
+    m_cutDirection->setToolTip(tr("Desired chip load orientation. Climb is generally preferred for CNC routers."));
+    form->addRow(tr("Cut Direction"), m_cutDirection);
+
     m_paramsMm.leaveStock_mm = m_paramsMm.stockAllowance_mm;
 
     layout->addLayout(form);
@@ -135,7 +171,16 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
         emit toolChanged(tool.id);
     });
 
-    const auto boxes = {m_toolDiameter, m_stepOver, m_maxDepth, m_feedRate, m_spindle};
+    const auto boxes = {m_toolDiameter,
+                        m_stepOver,
+                        m_leaveStock,
+                        m_maxDepth,
+                        m_feedRate,
+                        m_spindle,
+                        m_rampAngle,
+                        m_rampRadius,
+                        m_leadIn,
+                        m_leadOut};
     for (QDoubleSpinBox* box : boxes)
     {
         connect(box, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
@@ -158,6 +203,28 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
         validateInputs();
     });
 
+    connect(m_enableRamp, &QCheckBox::toggled, this, [this](bool checked) {
+        if (m_rampAngle)
+        {
+            m_rampAngle->setEnabled(checked);
+        }
+        syncParamsFromWidgets();
+        validateInputs();
+    });
+
+    connect(m_enableHelical, &QCheckBox::toggled, this, [this](bool checked) {
+        if (m_rampRadius)
+        {
+            m_rampRadius->setEnabled(checked);
+        }
+        syncParamsFromWidgets();
+        validateInputs();
+    });
+
+    connect(m_cutDirection, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        syncParamsFromWidgets();
+    });
+
     connect(m_generateButton, &QPushButton::clicked, this, &ToolpathSettingsWidget::emitGenerate);
 
     m_paramsMm.toolDiameter = 6.0;
@@ -168,6 +235,13 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
     m_paramsMm.rasterAngleDeg = 0.0;
     m_paramsMm.useHeightField = true;
     m_paramsMm.cutterType = tp::UserParams::CutterType::FlatEndmill;
+    m_paramsMm.enableRamp = true;
+    m_paramsMm.rampAngleDeg = 3.0;
+    m_paramsMm.enableHelical = false;
+    m_paramsMm.rampRadius = 3.0;
+    m_paramsMm.leadInLength = 0.0;
+    m_paramsMm.leadOutLength = 0.0;
+    m_paramsMm.cutDirection = tp::UserParams::CutDirection::Climb;
 
     updateRanges();
     applyUnitsToWidgets();
@@ -281,18 +355,44 @@ bool ToolpathSettingsWidget::validateInputs()
 {
     bool allValid = true;
 
-    const auto check = [this, &allValid](QDoubleSpinBox* box) {
-        const bool valid = box && box->value() > 0.0;
+    const auto validateBox = [this, &allValid](QDoubleSpinBox* box, double minValue, bool inclusive) {
+        if (!box)
+        {
+            return;
+        }
+        const double value = box->value();
+        const bool valid = inclusive ? (value >= minValue) : (value > minValue);
         applyValidity(box, valid);
         allValid = allValid && valid;
     };
 
-    check(m_toolDiameter);
-    check(m_stepOver);
-    check(m_leaveStock);
-    check(m_maxDepth);
-    check(m_feedRate);
-    check(m_spindle);
+    validateBox(m_toolDiameter, 0.0, false);
+    validateBox(m_stepOver, 0.0, false);
+    validateBox(m_leaveStock, 0.0, false);
+    validateBox(m_maxDepth, 0.0, false);
+    validateBox(m_feedRate, 0.0, false);
+    validateBox(m_spindle, 0.0, false);
+
+    if (m_enableRamp && m_enableRamp->isChecked())
+    {
+        validateBox(m_rampAngle, 0.0, false);
+    }
+    else
+    {
+        applyValidity(m_rampAngle, true);
+    }
+
+    if (m_enableHelical && m_enableHelical->isChecked())
+    {
+        validateBox(m_rampRadius, 0.0, false);
+    }
+    else
+    {
+        applyValidity(m_rampRadius, true);
+    }
+
+    validateBox(m_leadIn, 0.0, true);
+    validateBox(m_leadOut, 0.0, true);
 
     if (m_generateButton)
     {
@@ -324,37 +424,95 @@ void ToolpathSettingsWidget::applyUnitsToWidgets()
     const QString lengthSuffix = QStringLiteral(" ") + common::unitSuffix(m_unit);
     const QString feedSuffix = QStringLiteral(" ") + common::feedSuffix(m_unit);
 
-    m_toolDiameter->setSuffix(lengthSuffix);
-    m_stepOver->setSuffix(lengthSuffix);
-    m_leaveStock->setSuffix(lengthSuffix);
-    m_maxDepth->setSuffix(lengthSuffix);
-    m_feedRate->setSuffix(feedSuffix);
+    const auto setLengthSuffix = [&](QDoubleSpinBox* box) {
+        if (box)
+        {
+            box->setSuffix(lengthSuffix);
+        }
+    };
+
+    setLengthSuffix(m_toolDiameter);
+    setLengthSuffix(m_stepOver);
+    setLengthSuffix(m_leaveStock);
+    setLengthSuffix(m_maxDepth);
+    if (m_feedRate)
+    {
+        m_feedRate->setSuffix(feedSuffix);
+    }
+    setLengthSuffix(m_rampRadius);
+    setLengthSuffix(m_leadIn);
+    setLengthSuffix(m_leadOut);
+
+    if (m_rampAngle)
+    {
+        m_rampAngle->setSuffix(QStringLiteral(" \u00B0"));
+    }
     if (m_rasterAngle)
     {
-        m_rasterAngle->setSuffix(QStringLiteral(" °"));
+        m_rasterAngle->setSuffix(QStringLiteral(" \u00B0"));
     }
 }
 
 void ToolpathSettingsWidget::updateRanges()
 {
-    m_toolDiameter->setRange(displayFromMm(kMinDiameterMm), displayFromMm(kMaxDiameterMm));
-    m_toolDiameter->setSingleStep(displayFromMm(0.1));
+    if (m_toolDiameter)
+    {
+        m_toolDiameter->setRange(displayFromMm(kMinDiameterMm), displayFromMm(kMaxDiameterMm));
+        m_toolDiameter->setSingleStep(displayFromMm(0.1));
+    }
 
-    m_stepOver->setRange(displayFromMm(kMinStepMm), displayFromMm(kMaxStepMm));
-    m_stepOver->setSingleStep(displayFromMm(0.1));
+    if (m_stepOver)
+    {
+        m_stepOver->setRange(displayFromMm(kMinStepMm), displayFromMm(kMaxStepMm));
+        m_stepOver->setSingleStep(displayFromMm(0.1));
+    }
 
-    m_leaveStock->setRange(0.0, displayFromMm(20.0));
-    m_leaveStock->setSingleStep(displayFromMm(0.05));
+    if (m_leaveStock)
+    {
+        m_leaveStock->setRange(0.0, displayFromMm(20.0));
+        m_leaveStock->setSingleStep(displayFromMm(0.05));
+    }
 
-    m_maxDepth->setRange(displayFromMm(kMinDepthMm), displayFromMm(kMaxDepthMm));
-    m_maxDepth->setSingleStep(displayFromMm(0.1));
+    if (m_maxDepth)
+    {
+        m_maxDepth->setRange(displayFromMm(kMinDepthMm), displayFromMm(kMaxDepthMm));
+        m_maxDepth->setSingleStep(displayFromMm(0.1));
+    }
 
-    m_feedRate->setRange(displayFromMm(kMinFeedMm), displayFromMm(kMaxFeedMm));
-    m_feedRate->setSingleStep(displayFromMm(10.0));
+    if (m_feedRate)
+    {
+        m_feedRate->setRange(displayFromMm(kMinFeedMm), displayFromMm(kMaxFeedMm));
+        m_feedRate->setSingleStep(displayFromMm(10.0));
+    }
+
     if (m_rasterAngle)
     {
         m_rasterAngle->setRange(-180.0, 180.0);
         m_rasterAngle->setSingleStep(5.0);
+    }
+
+    if (m_rampAngle)
+    {
+        m_rampAngle->setRange(0.5, 45.0);
+        m_rampAngle->setSingleStep(0.5);
+    }
+
+    if (m_rampRadius)
+    {
+        m_rampRadius->setRange(displayFromMm(0.1), displayFromMm(200.0));
+        m_rampRadius->setSingleStep(displayFromMm(1.0));
+    }
+
+    if (m_leadIn)
+    {
+        m_leadIn->setRange(0.0, displayFromMm(200.0));
+        m_leadIn->setSingleStep(displayFromMm(0.5));
+    }
+
+    if (m_leadOut)
+    {
+        m_leadOut->setRange(0.0, displayFromMm(200.0));
+        m_leadOut->setSingleStep(displayFromMm(0.5));
     }
 }
 
@@ -368,6 +526,13 @@ void ToolpathSettingsWidget::syncWidgetsFromParams()
     QSignalBlocker blocker6(m_rasterAngle);
     QSignalBlocker blocker7(m_useHeightField);
     QSignalBlocker blocker8(m_leaveStock);
+    QSignalBlocker blocker9(m_enableRamp);
+    QSignalBlocker blocker10(m_rampAngle);
+    QSignalBlocker blocker11(m_enableHelical);
+    QSignalBlocker blocker12(m_rampRadius);
+    QSignalBlocker blocker13(m_leadIn);
+    QSignalBlocker blocker14(m_leadOut);
+    QSignalBlocker blocker15(m_cutDirection);
 
     m_toolDiameter->setValue(displayFromMm(m_paramsMm.toolDiameter));
     m_stepOver->setValue(displayFromMm(m_paramsMm.stepOver));
@@ -382,6 +547,41 @@ void ToolpathSettingsWidget::syncWidgetsFromParams()
     if (m_useHeightField)
     {
         m_useHeightField->setChecked(m_paramsMm.useHeightField);
+    }
+    if (m_enableRamp)
+    {
+        m_enableRamp->setChecked(m_paramsMm.enableRamp);
+    }
+    if (m_rampAngle)
+    {
+        m_rampAngle->setValue(m_paramsMm.rampAngleDeg);
+        m_rampAngle->setEnabled(m_paramsMm.enableRamp);
+    }
+    if (m_enableHelical)
+    {
+        m_enableHelical->setChecked(m_paramsMm.enableHelical);
+    }
+    if (m_rampRadius)
+    {
+        m_rampRadius->setValue(displayFromMm(m_paramsMm.rampRadius));
+        m_rampRadius->setEnabled(m_paramsMm.enableHelical);
+    }
+    if (m_leadIn)
+    {
+        m_leadIn->setValue(displayFromMm(m_paramsMm.leadInLength));
+    }
+    if (m_leadOut)
+    {
+        m_leadOut->setValue(displayFromMm(m_paramsMm.leadOutLength));
+    }
+    if (m_cutDirection)
+    {
+        const int value = static_cast<int>(m_paramsMm.cutDirection);
+        const int index = m_cutDirection->findData(value);
+        if (index >= 0)
+        {
+            m_cutDirection->setCurrentIndex(index);
+        }
     }
 }
 
@@ -402,6 +602,35 @@ void ToolpathSettingsWidget::syncParamsFromWidgets()
     {
         m_paramsMm.useHeightField = m_useHeightField->isChecked();
     }
+    if (m_enableRamp)
+    {
+        m_paramsMm.enableRamp = m_enableRamp->isChecked();
+    }
+    if (m_rampAngle)
+    {
+        m_paramsMm.rampAngleDeg = m_rampAngle->value();
+    }
+    if (m_enableHelical)
+    {
+        m_paramsMm.enableHelical = m_enableHelical->isChecked();
+    }
+    if (m_rampRadius)
+    {
+        m_paramsMm.rampRadius = mmFromDisplay(m_rampRadius->value());
+    }
+    if (m_leadIn)
+    {
+        m_paramsMm.leadInLength = mmFromDisplay(m_leadIn->value());
+    }
+    if (m_leadOut)
+    {
+        m_paramsMm.leadOutLength = mmFromDisplay(m_leadOut->value());
+    }
+    if (m_cutDirection)
+    {
+        const int value = m_cutDirection->currentData().toInt();
+        m_paramsMm.cutDirection = static_cast<tp::UserParams::CutDirection>(value);
+    }
 }
 
 void ToolpathSettingsWidget::applyToolDefaults(const common::Tool& tool)
@@ -412,6 +641,13 @@ void ToolpathSettingsWidget::applyToolDefaults(const common::Tool& tool)
     m_paramsMm.leaveStock_mm = std::clamp(tool.recommendedStepOverMm() * 0.25, 0.0, tool.diameterMm * 0.5);
     m_paramsMm.stockAllowance_mm = m_paramsMm.leaveStock_mm;
     m_paramsMm.cutterType = cutterTypeFromTool(tool);
+    m_paramsMm.enableRamp = true;
+    m_paramsMm.rampAngleDeg = std::clamp(m_paramsMm.rampAngleDeg, 0.5, 45.0);
+    m_paramsMm.enableHelical = false;
+    m_paramsMm.rampRadius = std::max(tool.diameterMm * 0.5, 1.0);
+    m_paramsMm.leadInLength = 0.0;
+    m_paramsMm.leadOutLength = 0.0;
+    m_paramsMm.cutDirection = tp::UserParams::CutDirection::Climb;
     syncWidgetsFromParams();
     validateInputs();
 }
@@ -436,3 +672,6 @@ double ToolpathSettingsWidget::mmFromDisplay(double value) const
 }
 
 } // namespace app
+
+
+

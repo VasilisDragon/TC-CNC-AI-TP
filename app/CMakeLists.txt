@@ -107,6 +107,7 @@ target_link_libraries(app
         Qt6::OpenGL
         Qt6::OpenGLWidgets
         render
+        sim
         io
         tp
         common

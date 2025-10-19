@@ -57,6 +57,13 @@ private:
     QDoubleSpinBox* m_feedRate{nullptr};
     QDoubleSpinBox* m_spindle{nullptr};
     QDoubleSpinBox* m_rasterAngle{nullptr};
+    QCheckBox* m_enableRamp{nullptr};
+    QDoubleSpinBox* m_rampAngle{nullptr};
+    QDoubleSpinBox* m_rampRadius{nullptr};
+    QCheckBox* m_enableHelical{nullptr};
+    QDoubleSpinBox* m_leadIn{nullptr};
+    QDoubleSpinBox* m_leadOut{nullptr};
+    QComboBox* m_cutDirection{nullptr};
     QDoubleSpinBox* m_leaveStock{nullptr};
     QCheckBox* m_useHeightField{nullptr};
     QPushButton* m_generateButton{nullptr};
