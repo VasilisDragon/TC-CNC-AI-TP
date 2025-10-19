@@ -10,6 +10,7 @@ exports both TorchScript and ONNX artefacts alongside lightweight metadata.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import time
@@ -63,6 +64,8 @@ FEATURE_NAMES_V2: list[str] = [
     "user_step_over_mm",
     "tool_diameter_mm",
 ]
+
+EXPECTED_FEATURE_COUNT = 17
 
 
 def get_feature_names(use_v2: bool) -> list[str]:
@@ -537,60 +540,53 @@ def build_interface_schema(feature_names: list[str]) -> Dict[str, object]:
 
 
 def make_model_card(
-    torch_version: str,
+    model_type: str,
+    framework: str,
+    versions: list[str],
+    feature_names: list[str],
+    feature_scale: torch.Tensor,
+    dataset_id: str,
+    dataset_sha: str,
+    created_at: str,
     metrics: Metrics,
-    best_epoch: int,
-    args: argparse.Namespace,
-    schema: dict,
-    feature_version: str,
 ) -> dict:
-    """Assemble a lightweight model card."""
-    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    """Construct a schema-compliant model card for the trained artefact."""
+
+    feature_count = len(feature_names)
+    if feature_count != EXPECTED_FEATURE_COUNT:
+        raise ValueError(
+            f"model card schema expects {EXPECTED_FEATURE_COUNT} features, got {feature_count}."
+        )
+    if feature_scale.numel() != feature_count:
+        raise ValueError(
+            f"feature_scale must contain {feature_count} entries, got {feature_scale.numel()}."
+        )
+
+    std_values = [float(value) for value in feature_scale.tolist()]
     return {
-        "model_name": "strategy_v0",
-        "version": "0",
-        "timestamp": timestamp,
-        "framework": {
-            "name": "PyTorch",
-            "version": torch_version,
+        "schema_version": "1.0.0",
+        "model_type": model_type,
+        "features": {
+            "count": feature_count,
+            "names": feature_names,
+            "normalize": {
+                "mean": [0.0] * feature_count,
+                "std": std_values,
+            },
         },
-        "artifacts": {
-            "torchscript": str(args.output_dir / args.torchscript_name),
-            "onnx": str(args.output_dir / args.onnx_name),
-            "onnx_json": str(args.output_dir / args.onnx_json_name),
-        },
-        "interface": {**schema, "feature_version": feature_version},
         "training": {
-            "epochs_run": int(args.epochs),
-            "best_epoch": int(best_epoch),
-            "patience": int(args.patience),
-            "seed": int(args.seed),
-            "optimizer": "Adam",
-            "learning_rate": args.learning_rate,
-            "loss_components": {
-                "cross_entropy": 1.0,
-                "angle_l1": args.angle_weight,
-                "step_l1": args.step_weight,
-            },
-            "dataset": {
-                "strategy": "synthetic heuristics matching generate_synthetic.py",
-                "num_samples": int(args.samples),
-                "val_split": args.val_split,
-            },
+            "framework": framework,
+            "versions": versions,
         },
-        "metrics": {
-            "validation": {
-                "loss": metrics.loss,
-                "classification_loss": metrics.cls_loss,
-                "angle_mae_deg": metrics.angle_mae,
-                "step_mae_mm": metrics.step_mae,
-                "accuracy": metrics.accuracy,
-            }
+        "dataset": {
+            "id": dataset_id,
+            "sha256": dataset_sha,
         },
-        "usage_notes": [
-            "Angles are reported in degrees; raster predictions near zero indicate neutral orientation.",
-            "Step-over is constrained to 90% of the provided tool diameter.",
-        ],
+        "created_at": created_at,
+        "validation": {
+            "loss": metrics.loss,
+            "accuracy": metrics.accuracy,
+        },
     }
 
 
@@ -619,7 +615,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--torchscript-name", type=str, default="strategy_v0.pt", help="TorchScript file name.")
     parser.add_argument("--onnx-name", type=str, default="strategy_v0.onnx", help="ONNX file name.")
     parser.add_argument("--onnx-json-name", type=str, default="strategy_v0.onnx.json", help="ONNX schema JSON name.")
-    parser.add_argument("--model-card-name", type=str, default="strategy_v0.card.json", help="Model card JSON name.")
+    parser.add_argument(
+        "--torch-card-name",
+        type=str,
+        default="strategy_v0.pt.model.json",
+        help="TorchScript model card JSON name.",
+    )
+    parser.add_argument(
+        "--onnx-card-name",
+        type=str,
+        default="strategy_v0.onnx.model.json",
+        help="ONNX model card JSON name.",
+    )
     parser.add_argument("--device", type=str, default="cpu", help="Training device (cpu or cuda).")
     parser.add_argument("--opset", type=int, default=17, help="ONNX opset version.")
     return parser.parse_args()
@@ -632,6 +639,10 @@ def main() -> None:
     use_v2 = args.v2_features
     feature_names = get_feature_names(use_v2)
     feature_scale = build_feature_scale(use_v2)
+    if len(feature_names) != EXPECTED_FEATURE_COUNT:
+        raise RuntimeError(
+            "Model card schema requires the v2 feature set (17 features). Rerun with --v2-features."
+        )
     tool_index = len(feature_names) - 1
     feature_version = "v2" if use_v2 else "v1"
 
@@ -643,7 +654,7 @@ def main() -> None:
         preview = ", ".join(f"{v:.3f}" for v in features[0][: min(5, features.shape[1])])
         print(f"[train_strategy] Feature dim: {features.shape[1]} ({feature_version}); preview: [{preview}]")
 
-    model, val_metrics, best_epoch = train_model(
+    model, val_metrics, _best_epoch = train_model(
         dataset,
         device,
         epochs=args.epochs,
@@ -673,20 +684,53 @@ def main() -> None:
     schema = build_interface_schema(feature_names)
     write_json(args.output_dir / args.onnx_json_name, schema)
 
-    model_card = make_model_card(
-        torch.__version__,
-        val_metrics,
-        best_epoch,
-        args,
-        schema,
-        feature_version,
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    dataset_path = getattr(args, "dataset_path", "")
+    if dataset_path:
+        dataset_id = Path(dataset_path).name
+    else:
+        dataset_id = f"synthetic_{args.samples}"
+    dataset_digest = hashlib.sha256(f"{dataset_id}:{args.samples}:{args.seed}".encode("utf-8")).hexdigest()
+
+    torch_card = make_model_card(
+        model_type="torchscript",
+        framework="PyTorch",
+        versions=[torch.__version__],
+        feature_names=feature_names,
+        feature_scale=feature_scale,
+        dataset_id=dataset_id,
+        dataset_sha=dataset_digest,
+        created_at=created_at,
+        metrics=val_metrics,
     )
-    write_json(args.output_dir / args.model_card_name, model_card)
+
+    try:
+        import onnxruntime as ort  # type: ignore
+
+        onnx_versions = [getattr(ort, "__version__", "unknown")]
+    except Exception:
+        onnx_versions = [f"opset-{args.opset}"]
+
+    onnx_card = make_model_card(
+        model_type="onnx",
+        framework="ONNXRuntime",
+        versions=onnx_versions,
+        feature_names=feature_names,
+        feature_scale=feature_scale,
+        dataset_id=dataset_id,
+        dataset_sha=dataset_digest,
+        created_at=created_at,
+        metrics=val_metrics,
+    )
+
+    write_json(args.output_dir / args.torch_card_name, torch_card)
+    write_json(args.output_dir / args.onnx_card_name, onnx_card)
 
     print(f"TorchScript saved to: {torchscript_path}")
     print(f"ONNX saved to      : {onnx_path}")
     print(f"Schema JSON saved to: {args.output_dir / args.onnx_json_name}")
-    print(f"Model card saved to : {args.output_dir / args.model_card_name}")
+    print(f"Torch card saved to : {args.output_dir / args.torch_card_name}")
+    print(f"ONNX card saved to  : {args.output_dir / args.onnx_card_name}")
 
 
 if __name__ == "__main__":

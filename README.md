@@ -13,9 +13,15 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
 
 - **Desktop front-end** - `app/`, `src/app/`, and `resources/` provide the Qt widgets, persistent preferences, build metadata, and icons that make up the user interface.
 - **Shared C++ libraries** - `common/`, `io/`, `render/`, and `src/{common,io,render,tp}` expose geometry primitives, importers, GPU viewers, and toolpath kernels (waterline, raster, OpenCAMLib integration).
-- **AI integration** - `src/ai/`, `models/`, and `src/train/` orchestrate feature extraction, Torch/ONNX inference, and long running training jobs managed by the application.
+- **AI integration** - `src/ai/`, `models/`, and `src/train/` orchestrate feature extraction, Torch/ONNX inference, and long running training jobs managed by the application. Every model artefact ships with a sibling `*.model.json` card.
 - **Training toolchain** - `train/`, `new_generate_synthetic.py`, and `old_generate_synthetic.py` generate synthetic CAD datasets, train baseline models, and export reproducible artefacts.
 - **Docs, tests, and automation** - `docs/`, `tests/`, `samples/`, and `scripts/` provide reference material, doctest-based coverage, sample geometry, and environment diagnostics.
+
+## Toolpath Entry Controls
+
+- `enableRamp` pairs with `rampAngleDeg` to replace plunges with linear entries, while `enableHelical` and `rampRadius` approximate helical drops when the cut plane sits below clearance.
+- `leadInLength` and `leadOutLength` add tangent lead segments to raster and waterline passes so the cutter reaches engagement smoothly.
+- `cutDirection` flips raster rows and waterline contours between climb and conventional before linking so downstream motion honours the requested chip load.
 
 ## Repository Layout
 
@@ -38,7 +44,7 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
   - `train_strategy.py` (model training + export),
   - `make_fixed_model.py` (TorchScript smoke-test stub),
   - `requirements.txt` (pip dependencies).
-- `models/` - Example TorchScript/ONNX artefacts and metadata (e.g., `strategy_v2.card.json`).
+- `models/` - Example TorchScript/ONNX artefacts and metadata (e.g., `strategy_v2.pt.model.json`).
 - `samples/` - STL sample geometry for quick imports.
 - `tests/` - Doctest-powered C++ unit and smoke tests (`basic_sanity.cpp`, `onnx_ai_smoke.cpp`, etc.).
 - `docs/` - Architecture notes, build instructions, QA checklists, and deployment playbooks. See `docs/map.md` for a verified module map tying targets to their responsibilities.
@@ -97,6 +103,14 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
   ```
   Both new_generate_synthetic.py and old_generate_synthetic.py remain for reproducibility and regression testing.
 
+## Model Cards
+
+- Every TorchScript (`*.pt`) and ONNX (`*.onnx`) artefact must ship with a sibling `*.model.json` file in the same directory.
+- The schema lives at `ai/model_card.schema.json`; offline validation matches the loader's runtime checks.
+- `features.count` must equal `FeatureExtractor::featureCount() + 2` (currently 17) and both `normalize.mean` and `normalize.std` need the same number of entries.
+- `training.framework` is compared against the active backend (`PyTorch` for TorchAI, `ONNXRuntime` for OnnxAI). A mismatch disables inference and surfaces the card error in the UI.
+- Sample cards can be found under `models/strategy_v2.*.model.json` and make for a good template when exporting new models.
+
 ## Models & Runtime AI
 
 - Drop TorchScript (.pt) or ONNX (.onnx) artefacts into models/. ModelManager refreshes the combo, and the Training Jobs dock auto-registers new models once a job succeeds.
@@ -119,6 +133,7 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
 - BUILD.md, docs/BUILD_DOCTOR.md, docs/OCL_WINDOWS.md - expanded build instructions and troubleshooting.
 - docs/QA_CHECKLIST.md, docs/TESTING.md, docs/SMOKE_P*.md - manual QA flows.
 - docs/TRAINING_GUI.md - updated walkthrough of the Training menu, environment dock, and jobs panel (now with GPU detection call-outs).
+- docs/gpu_setup.md - end-to-end instructions for enabling CUDA-backed Torch/ONNX inference.
 - resources/tools.json - default tool library for the Toolpath Settings widget.
 - samples/sample_part.stl - fast-track demo mesh.
 - scripts/verify_env.ps1 - PowerShell helper for MSVC, Qt, CMake, Ninja, LibTorch/ONNX sanity checks.

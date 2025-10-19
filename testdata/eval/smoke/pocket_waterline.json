@@ -1,0 +1,11 @@
+{
+  "id": "pocket_waterline",
+  "mesh": "pocket_waterline.stl",
+  "strategy": "waterline",
+  "raster_angle_deg": 8.0,
+  "step_over_mm": 1.5,
+  "user_step_over_mm": 1.8,
+  "tool_diameter_mm": 4.0,
+  "path_length_mm": 1340.0,
+  "feedrate_mm_per_min": 650.0
+}

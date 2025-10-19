@@ -100,4 +100,4 @@ Train the machining strategy model and emit the artefacts described in the proje
 python -m train.train_strategy --output-dir models
 ```
 
-The command writes `strategy_v0.pt`, `strategy_v0.onnx`, `strategy_v0.onnx.json`, and `strategy_v0.card.json` into the target directory. Re-run the script with different flags (see `--help`) to customise epochs, dataset size, or destinations.
+The command writes `strategy_v0.pt`, `strategy_v0.onnx`, `strategy_v0.onnx.json`, and model cards `strategy_v0.pt.model.json` / `strategy_v0.onnx.model.json` into the target directory. Re-run the script with different flags (see `--help`) to customise epochs, dataset size, or destinations.

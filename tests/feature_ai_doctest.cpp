@@ -2,6 +2,7 @@
 #include "doctest/doctest.h"
 
 #include "ai/FeatureExtractor.h"
+#include "ai/ModelCard.h"
 #include "ai/OnnxAI.h"
 #include "ai/TorchAI.h"
 #include "render/Model.h"
@@ -9,7 +10,16 @@
 #include "tp/Toolpath.h"
 #include "tp/ToolpathGenerator.h"
 
+#include <QtCore/QFile>
+#include <QtCore/QIODevice>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QStringList>
+#include <QtCore/QTemporaryDir>
+
 #include <glm/vec3.hpp>
+#include <filesystem>
 
 namespace
 {
@@ -32,7 +42,233 @@ render::Model makeTriangleModel()
     return model;
 }
 
+const QStringList& featureNames()
+{
+    static const QStringList names = {
+        QStringLiteral("bbox_x_mm"),
+        QStringLiteral("bbox_y_mm"),
+        QStringLiteral("bbox_z_mm"),
+        QStringLiteral("surface_area_mm2"),
+        QStringLiteral("volume_mm3"),
+        QStringLiteral("slope_bin_0_15"),
+        QStringLiteral("slope_bin_15_30"),
+        QStringLiteral("slope_bin_30_45"),
+        QStringLiteral("slope_bin_45_60"),
+        QStringLiteral("slope_bin_60_90"),
+        QStringLiteral("mean_curvature_rad"),
+        QStringLiteral("curvature_variance_rad2"),
+        QStringLiteral("flat_area_ratio"),
+        QStringLiteral("steep_area_ratio"),
+        QStringLiteral("pocket_depth_mm"),
+        QStringLiteral("user_step_over_mm"),
+        QStringLiteral("tool_diameter_mm")};
+    return names;
+}
+
+std::filesystem::path toFsPath(const QString& path)
+{
+#ifdef _WIN32
+    return std::filesystem::path(path.toStdWString());
+#else
+    return std::filesystem::path(path.toStdString());
+#endif
+}
+
+bool writeJson(const QString& filePath, const QJsonObject& json)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        return false;
+    }
+    const QByteArray data = QJsonDocument(json).toJson(QJsonDocument::Compact);
+    const bool ok = file.write(data) == data.size();
+    file.close();
+    return ok;
+}
+
+QJsonObject makeValidCard(const QString& modelType,
+                          const QString& framework,
+                          const QStringList& versions)
+{
+    const int featureCount = static_cast<int>(ai::FeatureExtractor::featureCount() + 2);
+
+    QJsonObject root;
+    root.insert(QStringLiteral("schema_version"), QStringLiteral("1.0.0"));
+    root.insert(QStringLiteral("model_type"), modelType);
+
+    QJsonObject features;
+    features.insert(QStringLiteral("count"), featureCount);
+
+    QJsonArray namesArray;
+    for (const QString& name : featureNames())
+    {
+        namesArray.append(name);
+    }
+    features.insert(QStringLiteral("names"), namesArray);
+
+    QJsonArray meanArray;
+    QJsonArray stdArray;
+    for (int i = 0; i < featureCount; ++i)
+    {
+        meanArray.append(0.0);
+        stdArray.append(1.0);
+    }
+
+    QJsonObject normalize;
+    normalize.insert(QStringLiteral("mean"), meanArray);
+    normalize.insert(QStringLiteral("std"), stdArray);
+    features.insert(QStringLiteral("normalize"), normalize);
+    root.insert(QStringLiteral("features"), features);
+
+    QJsonObject training;
+    training.insert(QStringLiteral("framework"), framework);
+    QJsonArray versionArray;
+    for (const QString& version : versions)
+    {
+        versionArray.append(version);
+    }
+    training.insert(QStringLiteral("versions"), versionArray);
+    root.insert(QStringLiteral("training"), training);
+
+    QJsonObject dataset;
+    dataset.insert(QStringLiteral("id"), QStringLiteral("testset"));
+    dataset.insert(QStringLiteral("sha256"),
+                   QStringLiteral("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+    root.insert(QStringLiteral("dataset"), dataset);
+    root.insert(QStringLiteral("created_at"), QStringLiteral("2025-01-15T12:00:00Z"));
+
+    return root;
+}
+
 } // namespace
+
+TEST_CASE("ModelCard loads valid Torch schema")
+{
+    QTemporaryDir dir;
+    CHECK(dir.isValid());
+    if (!dir.isValid())
+    {
+        return;
+    }
+
+    const QString modelFile = dir.filePath(QStringLiteral("sample.pt"));
+    QFile torchFile(modelFile);
+    const bool openedTorch = torchFile.open(QIODevice::WriteOnly);
+    CHECK(openedTorch);
+    if (!openedTorch)
+    {
+        return;
+    }
+    torchFile.close();
+
+    QJsonObject card = makeValidCard(QStringLiteral("torchscript"),
+                                     QStringLiteral("PyTorch"),
+                                     {QStringLiteral("2.1.0")});
+    const bool savedTorchCard = writeJson(dir.filePath(QStringLiteral("sample.pt.model.json")), card);
+    CHECK(savedTorchCard);
+    if (!savedTorchCard)
+    {
+        return;
+    }
+
+    std::string error;
+    const auto loaded = ai::ModelCard::loadForModel(toFsPath(modelFile),
+                                                    ai::ModelCard::Backend::Torch,
+                                                    error);
+    CHECK(loaded.has_value());
+    if (!loaded.has_value())
+    {
+        return;
+    }
+    CHECK(error.empty());
+    CHECK(loaded->featureCount == ai::FeatureExtractor::featureCount() + 2);
+    CHECK(loaded->normalization.mean.size() == loaded->featureCount);
+    CHECK(loaded->training.framework.find("PyTorch") != std::string::npos);
+}
+
+TEST_CASE("ModelCard rejects normalization mismatch")
+{
+    QTemporaryDir dir;
+    CHECK(dir.isValid());
+    if (!dir.isValid())
+    {
+        return;
+    }
+
+    const QString modelFile = dir.filePath(QStringLiteral("broken.pt"));
+    QFile brokenFile(modelFile);
+    const bool openedBroken = brokenFile.open(QIODevice::WriteOnly);
+    CHECK(openedBroken);
+    if (!openedBroken)
+    {
+        return;
+    }
+    brokenFile.close();
+
+    QJsonObject card = makeValidCard(QStringLiteral("torchscript"),
+                                     QStringLiteral("PyTorch"),
+                                     {QStringLiteral("2.1.0")});
+    QJsonObject features = card.value(QStringLiteral("features")).toObject();
+    QJsonObject normalize = features.value(QStringLiteral("normalize")).toObject();
+    QJsonArray mean;
+    mean.append(0.0);
+    normalize.insert(QStringLiteral("mean"), mean);
+    features.insert(QStringLiteral("normalize"), normalize);
+    card.insert(QStringLiteral("features"), features);
+    const bool savedBroken = writeJson(dir.filePath(QStringLiteral("broken.pt.model.json")), card);
+    CHECK(savedBroken);
+    if (!savedBroken)
+    {
+        return;
+    }
+
+    std::string error;
+    const auto loaded = ai::ModelCard::loadForModel(toFsPath(modelFile),
+                                                    ai::ModelCard::Backend::Torch,
+                                                    error);
+    CHECK_FALSE(loaded.has_value());
+    CHECK_FALSE(error.empty());
+    CHECK(error.find("features.normalize.mean") != std::string::npos);
+}
+
+TEST_CASE("ModelCard rejects ONNX framework mismatch")
+{
+    QTemporaryDir dir;
+    CHECK(dir.isValid());
+    if (!dir.isValid())
+    {
+        return;
+    }
+
+    const QString modelFile = dir.filePath(QStringLiteral("sample.onnx"));
+    QFile onnxFile(modelFile);
+    const bool openedOnnx = onnxFile.open(QIODevice::WriteOnly);
+    CHECK(openedOnnx);
+    if (!openedOnnx)
+    {
+        return;
+    }
+    onnxFile.close();
+
+    QJsonObject card = makeValidCard(QStringLiteral("onnx"),
+                                     QStringLiteral("TensorFlow"),
+                                     {QStringLiteral("2.14.0")});
+    const bool savedOnnxCard = writeJson(dir.filePath(QStringLiteral("sample.onnx.model.json")), card);
+    CHECK(savedOnnxCard);
+    if (!savedOnnxCard)
+    {
+        return;
+    }
+
+    std::string error;
+    const auto loaded = ai::ModelCard::loadForModel(toFsPath(modelFile),
+                                                    ai::ModelCard::Backend::Onnx,
+                                                    error);
+    CHECK_FALSE(loaded.has_value());
+    CHECK_FALSE(error.empty());
+    CHECK(error.find("framework") != std::string::npos);
+}
 
 TEST_CASE("FeatureExtractor flags invalid mesh")
 {

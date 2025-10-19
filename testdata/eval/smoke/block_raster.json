@@ -1,0 +1,11 @@
+{
+  "id": "block_raster",
+  "mesh": "block_raster.stl",
+  "strategy": "raster",
+  "raster_angle_deg": 45.0,
+  "step_over_mm": 2.8,
+  "user_step_over_mm": 2.5,
+  "tool_diameter_mm": 6.0,
+  "path_length_mm": 980.0,
+  "feedrate_mm_per_min": 900.0
+}

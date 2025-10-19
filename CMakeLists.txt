@@ -128,6 +128,7 @@ endif()
 
 add_subdirectory(common)
 add_subdirectory(render)
+add_subdirectory(sim)
 add_subdirectory(src/io)
 add_subdirectory(src/ai)
 add_subdirectory(src/tp)
@@ -222,17 +223,78 @@ if (BUILD_TESTING)
             tp
     )
 
+    add_executable(tp_entries_raster_tests
+        tests/tp_entries_raster.cpp
+    )
+    target_link_libraries(tp_entries_raster_tests
+        PRIVATE
+            tp
+    )
+
+    add_executable(tp_entries_waterline_tests
+        tests/tp_entries_waterline.cpp
+    )
+    target_link_libraries(tp_entries_waterline_tests
+        PRIVATE
+            tp
+    )
+
+    add_executable(post_arcfit_circle_tests
+        tests/post_arcfit_circle.cpp
+    )
+    target_link_libraries(post_arcfit_circle_tests
+        PRIVATE
+            tp
+    )
+
+    add_executable(post_arcfit_linear_tests
+        tests/post_arcfit_linear.cpp
+    )
+    target_link_libraries(post_arcfit_linear_tests
+        PRIVATE
+            tp
+    )
+
+    add_executable(post_arcfit_units_tests
+        tests/post_arcfit_units.cpp
+    )
+    target_link_libraries(post_arcfit_units_tests
+        PRIVATE
+            tp
+    )
+
+    add_executable(stock_sim_plane_tests
+        tests/stock_sim_plane.cpp
+    )
+    target_link_libraries(stock_sim_plane_tests
+        PRIVATE
+            sim
+            tp
+            render
+            common
+    )
+
     add_test(NAME basic_sanity COMMAND basic_sanity_tests)
     add_test(NAME path_safety COMMAND path_safety_tests)
     add_test(NAME headless_pipeline COMMAND headless_pipeline_tests)
     add_test(NAME feature_ai COMMAND feature_ai_tests)
     add_test(NAME tp_gouge_step COMMAND tp_gouge_step_tests)
     add_test(NAME tp_gouge_slope COMMAND tp_gouge_slope_tests)
+    add_test(NAME tp_entries_raster COMMAND tp_entries_raster_tests)
+    add_test(NAME tp_entries_waterline COMMAND tp_entries_waterline_tests)
+    add_test(NAME post_arcfit_circle COMMAND post_arcfit_circle_tests)
+    add_test(NAME post_arcfit_linear COMMAND post_arcfit_linear_tests)
+    add_test(NAME post_arcfit_units COMMAND post_arcfit_units_tests)
+    add_test(NAME stock_sim_plane COMMAND stock_sim_plane_tests)
 
     set_tests_properties(path_safety PROPERTIES LABELS fast)
     set_tests_properties(headless_pipeline PROPERTIES LABELS fast)
     set_tests_properties(basic_sanity PROPERTIES LABELS fast)
     set_tests_properties(feature_ai PROPERTIES LABELS fast)
+    set_tests_properties(post_arcfit_circle PROPERTIES LABELS fast)
+    set_tests_properties(post_arcfit_linear PROPERTIES LABELS fast)
+    set_tests_properties(post_arcfit_units PROPERTIES LABELS fast)
+    set_tests_properties(stock_sim_plane PROPERTIES LABELS fast)
 
     if (TARGET onnx_ai_smoke)
         add_test(NAME onnx_ai_smoke_test COMMAND onnx_ai_smoke)
