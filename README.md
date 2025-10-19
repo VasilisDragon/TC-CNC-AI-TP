@@ -13,7 +13,7 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
 
 - **Desktop front-end** - `app/`, `src/app/`, and `resources/` provide the Qt widgets, persistent preferences, build metadata, and icons that make up the user interface.
 - **Shared C++ libraries** - `common/`, `io/`, `render/`, and `src/{common,io,render,tp}` expose geometry primitives, importers, GPU viewers, and toolpath kernels (waterline, raster, OpenCAMLib integration).
-- **AI integration** - `src/ai/`, `models/`, and `src/train/` orchestrate feature extraction, Torch/ONNX inference, and long running training jobs managed by the application. Every model artefact ships with a sibling `*.model.json` card.
+- **AI integration** - `src/ai/`, `models/`, and `src/train/` orchestrate feature extraction, Torch/ONNX inference (with optional CUDA acceleration), and long running training jobs managed by the application. Every model artefact ships with a sibling `*.model.json` card.
 - **Training toolchain** - `train/`, `new_generate_synthetic.py`, and `old_generate_synthetic.py` generate synthetic CAD datasets, train baseline models, and export reproducible artefacts.
 - **Docs, tests, and automation** - `docs/`, `tests/`, `samples/`, and `scripts/` provide reference material, doctest-based coverage, sample geometry, and environment diagnostics.
 
@@ -46,6 +46,7 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
   - `requirements.txt` (pip dependencies).
 - `models/` - Example TorchScript/ONNX artefacts and metadata (e.g., `strategy_v2.pt.model.json`).
 - `samples/` - STL sample geometry for quick imports.
+- `testdata/` - Curated smoke datasets for evaluation (e.g., `testdata/eval/smoke` for the offline metrics script).
 - `tests/` - Doctest-powered C++ unit and smoke tests (`basic_sanity.cpp`, `onnx_ai_smoke.cpp`, etc.).
 - `docs/` - Architecture notes, build instructions, QA checklists, and deployment playbooks. See `docs/map.md` for a verified module map tying targets to their responsibilities.
 - `scripts/verify_env.ps1` - PowerShell helper to validate a Windows build environment.
@@ -118,6 +119,20 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
 - TorchAI and OnnxAI expose latency, last-error messages, and GPU availability. They gracefully downgrade to CPU when CUDA providers are absent and keep the UI honest.
 - Feature previews log once per session; redact console output if geometry-derived numbers are regulated where you deploy.
 
+## Offline Evaluation Toolkit
+
+- `tools/eval/run_eval.py` mirrors the C++ feature extractor, loads local meshes/metadata, and scores TorchScript or ONNX models. Select the execution target with `--device {auto,cpu,cuda}`.
+- Outputs include `metrics.csv` (per-sample predictions, logits, absolute errors) and `report.md` (accuracy, macro-F1, confusion matrix, time proxy).
+- Kick the tyres with the bundled dataset:
+  ```bash
+  python tools/eval/run_eval.py \
+      --dataset testdata/eval/smoke \
+      --model models/test_run/strategy_v0.onnx \
+      --output build/eval/smoke \
+      --device auto
+  ```
+- CUDA runs require the GPU-enabled LibTorch/ONNX packages plus the redistributable CUDA libraries (e.g., `libcublasLt`). Missing pieces trigger a logged warning and a safe fallback to CPU. See `docs/gpu_setup.md` for dependency wiring and troubleshooting.
+
 ## Testing
 
 1. Configure a debug build (linking is faster).
@@ -133,7 +148,8 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
 - BUILD.md, docs/BUILD_DOCTOR.md, docs/OCL_WINDOWS.md - expanded build instructions and troubleshooting.
 - docs/QA_CHECKLIST.md, docs/TESTING.md, docs/SMOKE_P*.md - manual QA flows.
 - docs/TRAINING_GUI.md - updated walkthrough of the Training menu, environment dock, and jobs panel (now with GPU detection call-outs).
-- docs/gpu_setup.md - end-to-end instructions for enabling CUDA-backed Torch/ONNX inference.
+- docs/gpu_setup.md - end-to-end instructions for enabling CUDA-backed Torch/ONNX inference, including runtime diagnostics.
+- docs/offline_eval.md - guide for `tools/eval/run_eval.py`, which mirrors the in-app feature extractor and generates CSV/Markdown reports with optional GPU inference.
 - resources/tools.json - default tool library for the Toolpath Settings widget.
 - samples/sample_part.stl - fast-track demo mesh.
 - scripts/verify_env.ps1 - PowerShell helper for MSVC, Qt, CMake, Ninja, LibTorch/ONNX sanity checks.
