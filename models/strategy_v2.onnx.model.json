@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0.0",
+  "model_type": "onnx",
+  "features": {
+    "count": 17,
+    "names": [
+      "bbox_x_mm",
+      "bbox_y_mm",
+      "bbox_z_mm",
+      "surface_area_mm2",
+      "volume_mm3",
+      "slope_bin_0_15",
+      "slope_bin_15_30",
+      "slope_bin_30_45",
+      "slope_bin_45_60",
+      "slope_bin_60_90",
+      "mean_curvature_rad",
+      "curvature_variance_rad2",
+      "flat_area_ratio",
+      "steep_area_ratio",
+      "pocket_depth_mm",
+      "user_step_over_mm",
+      "tool_diameter_mm"
+    ],
+    "normalize": {
+      "mean": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "std": [
+        100.0,
+        100.0,
+        100.0,
+        10000.0,
+        1000000.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        100.0,
+        10.0,
+        10.0
+      ]
+    }
+  },
+  "training": {
+    "framework": "ONNXRuntime",
+    "versions": ["1.16.0"]
+  },
+  "dataset": {
+    "id": "synthetic_v2",
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "created_at": "2025-01-15T12:00:00Z",
+  "validation": {
+    "loss": 0.1189,
+    "accuracy": 0.918
+  }
+}

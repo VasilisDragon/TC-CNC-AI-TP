@@ -5,11 +5,13 @@ qt_add_library(render STATIC
     include/render/Polyline.h
     ../src/render/ToolpathOverlay.h
     ../src/render/SimulationController.h
+    ../src/render/HeatmapOverlay.h
     src/CameraController.cpp
     src/Model.cpp
     ../src/render/ModelViewerWidget.cpp
     ../src/render/ToolpathOverlay.cpp
     ../src/render/SimulationController.cpp
+    ../src/render/HeatmapOverlay.cpp
 )
 
 target_include_directories(render
@@ -37,6 +39,8 @@ qt_add_resources(render "render_resources"
         shaders/flat.vert
         shaders/polyline.frag
         shaders/polyline.vert
+        shaders/heatmap.frag
+        shaders/heatmap.vert
 )
 
 

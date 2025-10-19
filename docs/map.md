@@ -29,7 +29,7 @@ Legend
 
 ## Post Processing & Export
 - [Verified] **Post interface** `tp::IPost` defines the contract that exporters rely on for controller-specific output (`src/tp/IPost.h:12`).
-- [Verified] **GRBL post** `tp::GRBLPost` emits standard GRBL G-code, honoring units and machine feed limits (`src/tp/GRBLPost.cpp:19`).
+- [Verified] **GRBL post** `tp::GRBLPost` emits standard GRBL G-code, fitting constant-Z spans into G2/G3 arcs capped by `post.max_arc_chord_error` while honoring unit scaling and machine feed limits (`src/tp/GRBLPost.cpp:277`).
 - [Verified] **Exporter** `tp::GCodeExporter::exportToFile` streams the selected post, embeds a tolerance fingerprint, and reports errors back to the caller (`src/tp/GCodeExporter.cpp:80`).
 - [Verified] **UI wiring** `MainWindow::saveToolpathToFile` presents post options, persists the file, and surfaces a preview in the console dock (`src/app/MainWindow.cpp:3027`).
 
@@ -44,3 +44,4 @@ Legend
 - [Verified] **Training orchestration** `train::TrainingManager` drives dataset generation and fine-tuning via external processes, honoring environment controls (`src/train/TrainingManager.cpp:29`).
 - [Verified] **Embedded diagnostics** Optional `tests_core` library exposes doctest-based checks when `WITH_EMBEDDED_TESTS` is enabled (`src/tests_core/CMakeLists.txt:1`, `src/tests_core/TestsCore.cpp:1`).
 - [Verified] **Headless smoke tests** Standalone executables such as `headless_pipeline.cpp` validate the importer → generator → post chain without the GUI (`tests/headless_pipeline.cpp:1`, `CMakeLists.txt:141`).
+- [Added] **Stock simulator** `sim::StockGrid` voxelizes model bounds, subtracts tool sweeps, and drives the viewer heatmap overlay with residual metrics (`sim/src/StockGrid.cpp:1`, `src/app/MainWindow.cpp:runStockSimulation`).
