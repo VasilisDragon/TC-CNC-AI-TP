@@ -57,6 +57,7 @@ private:
     QDoubleSpinBox* m_feedRate{nullptr};
     QDoubleSpinBox* m_spindle{nullptr};
     QDoubleSpinBox* m_rasterAngle{nullptr};
+    QDoubleSpinBox* m_leaveStock{nullptr};
     QCheckBox* m_useHeightField{nullptr};
     QPushButton* m_generateButton{nullptr};
 

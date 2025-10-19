@@ -10,6 +10,8 @@
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QVBoxLayout>
 
+#include <algorithm>
+
 namespace app
 {
 
@@ -62,8 +64,12 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
     m_toolDiameter->setToolTip(tr("Cutter diameter."));
 
     m_stepOver = new QDoubleSpinBox(this);
-    m_stepOver->setDecimals(3);
-    m_stepOver->setToolTip(tr("Raster spacing between passes (suggested ~40% of diameter)."));
+   m_stepOver->setDecimals(3);
+   m_stepOver->setToolTip(tr("Raster spacing between passes (suggested ~40% of diameter)."));
+
+    m_leaveStock = new QDoubleSpinBox(this);
+    m_leaveStock->setDecimals(3);
+    m_leaveStock->setToolTip(tr("Minimum stock to leave after waterline adjustment."));
 
     m_maxDepth = new QDoubleSpinBox(this);
     m_maxDepth->setDecimals(3);
@@ -82,6 +88,7 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
 
     form->addRow(tr("Tool Diameter"), m_toolDiameter);
     form->addRow(tr("Step-over"), m_stepOver);
+    form->addRow(tr("Leave Stock"), m_leaveStock);
     form->addRow(tr("Max Depth/Pass"), m_maxDepth);
     form->addRow(tr("Feed Rate"), m_feedRate);
     form->addRow(tr("Spindle RPM"), m_spindle);
@@ -97,6 +104,8 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
     m_useHeightField->setChecked(true);
     m_useHeightField->setToolTip(tr("Build a sampled height field when OpenCL acceleration is unavailable."));
     form->addRow(tr("HeightField"), m_useHeightField);
+
+    m_paramsMm.leaveStock_mm = m_paramsMm.stockAllowance_mm;
 
     layout->addLayout(form);
     layout->addStretch(1);
@@ -280,6 +289,7 @@ bool ToolpathSettingsWidget::validateInputs()
 
     check(m_toolDiameter);
     check(m_stepOver);
+    check(m_leaveStock);
     check(m_maxDepth);
     check(m_feedRate);
     check(m_spindle);
@@ -316,6 +326,7 @@ void ToolpathSettingsWidget::applyUnitsToWidgets()
 
     m_toolDiameter->setSuffix(lengthSuffix);
     m_stepOver->setSuffix(lengthSuffix);
+    m_leaveStock->setSuffix(lengthSuffix);
     m_maxDepth->setSuffix(lengthSuffix);
     m_feedRate->setSuffix(feedSuffix);
     if (m_rasterAngle)
@@ -331,6 +342,9 @@ void ToolpathSettingsWidget::updateRanges()
 
     m_stepOver->setRange(displayFromMm(kMinStepMm), displayFromMm(kMaxStepMm));
     m_stepOver->setSingleStep(displayFromMm(0.1));
+
+    m_leaveStock->setRange(0.0, displayFromMm(20.0));
+    m_leaveStock->setSingleStep(displayFromMm(0.05));
 
     m_maxDepth->setRange(displayFromMm(kMinDepthMm), displayFromMm(kMaxDepthMm));
     m_maxDepth->setSingleStep(displayFromMm(0.1));
@@ -353,9 +367,11 @@ void ToolpathSettingsWidget::syncWidgetsFromParams()
     QSignalBlocker blocker5(m_spindle);
     QSignalBlocker blocker6(m_rasterAngle);
     QSignalBlocker blocker7(m_useHeightField);
+    QSignalBlocker blocker8(m_leaveStock);
 
     m_toolDiameter->setValue(displayFromMm(m_paramsMm.toolDiameter));
     m_stepOver->setValue(displayFromMm(m_paramsMm.stepOver));
+    m_leaveStock->setValue(displayFromMm(m_paramsMm.leaveStock_mm));
     m_maxDepth->setValue(displayFromMm(m_paramsMm.maxDepthPerPass));
     m_feedRate->setValue(displayFromMm(m_paramsMm.feed));
     m_spindle->setValue(m_paramsMm.spindle);
@@ -373,9 +389,11 @@ void ToolpathSettingsWidget::syncParamsFromWidgets()
 {
     m_paramsMm.toolDiameter = mmFromDisplay(m_toolDiameter->value());
     m_paramsMm.stepOver = mmFromDisplay(m_stepOver->value());
+    m_paramsMm.leaveStock_mm = mmFromDisplay(m_leaveStock->value());
     m_paramsMm.maxDepthPerPass = mmFromDisplay(m_maxDepth->value());
     m_paramsMm.feed = mmFromDisplay(m_feedRate->value());
     m_paramsMm.spindle = m_spindle->value();
+    m_paramsMm.stockAllowance_mm = m_paramsMm.leaveStock_mm;
     if (m_rasterAngle)
     {
         m_paramsMm.rasterAngleDeg = m_rasterAngle->value();
@@ -391,6 +409,8 @@ void ToolpathSettingsWidget::applyToolDefaults(const common::Tool& tool)
     m_paramsMm.toolDiameter = tool.diameterMm;
     m_paramsMm.stepOver = tool.recommendedStepOverMm();
     m_paramsMm.maxDepthPerPass = tool.recommendedMaxDepthMm();
+    m_paramsMm.leaveStock_mm = std::clamp(tool.recommendedStepOverMm() * 0.25, 0.0, tool.diameterMm * 0.5);
+    m_paramsMm.stockAllowance_mm = m_paramsMm.leaveStock_mm;
     m_paramsMm.cutterType = cutterTypeFromTool(tool);
     syncWidgetsFromParams();
     validateInputs();
