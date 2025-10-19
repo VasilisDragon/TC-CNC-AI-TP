@@ -24,6 +24,12 @@ struct UserParams
         BallNose
     };
 
+    enum class CutDirection
+    {
+        Climb,
+        Conventional
+    };
+
     double toolDiameter{6.0};
     double stepOver{3.0};
     double maxDepthPerPass{1.0};
@@ -34,11 +40,21 @@ struct UserParams
     bool enableFinishPass{true};
     double stockAllowance_mm{0.3};
     double leaveStock_mm{0.3};
+    bool enableRamp{true};
     double rampAngleDeg{3.0};
+    double rampRadius{3.0};
+    bool enableHelical{false};
+    double leadInLength{0.0};
+    double leadOutLength{0.0};
     bool useHeightField{true};
     CutterType cutterType{CutterType::FlatEndmill};
+    CutDirection cutDirection{CutDirection::Climb};
     Stock stock{makeDefaultStock()};
     Machine machine{makeDefaultMachine()};
+    struct PostSettings
+    {
+        double maxArcChordError_mm{0.05};
+    } post{};
 };
 
 class ToolpathGenerator

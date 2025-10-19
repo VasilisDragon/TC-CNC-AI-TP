@@ -37,6 +37,7 @@ class QPushButton;
 class QMenu;
 class QWidget;
 class QMenu;
+class QVector3D;
 
 class AiPreferencesDialog;
 
@@ -55,6 +56,11 @@ class ImportWorker;
 namespace tp
 {
 class GenerateWorker;
+}
+
+namespace sim
+{
+struct StockGridSummary;
 }
 
 #include <QtCore/QString>
@@ -126,6 +132,12 @@ private:
     void cleanupGeneration();
     void loadSettings();
     void saveSettings() const;
+    void runStockSimulation();
+    void toggleHeatmap(bool checked);
+    void updateSimulationActionState();
+    void applySimulationSummary(const sim::StockGridSummary& summary, double cellSizeMm);
+    QVector3D heatmapColorForError(double errorMm, double cellSizeMm) const;
+    QString formatLengthLabel(double valueMm, int precision = 2) const;
     void openAiPreferences();
     void applyUnits(common::Unit unit, bool fromSettings = false);
     void updateActiveAiSummary();
@@ -212,6 +224,8 @@ private:
     QAction* m_simPlayAction{nullptr};
     QAction* m_simPauseAction{nullptr};
     QAction* m_simStopAction{nullptr};
+    QAction* m_runSimulationAction{nullptr};
+    QAction* m_showHeatmapAction{nullptr};
     QSlider* m_simProgressSlider{nullptr};
     QSlider* m_simSpeedSlider{nullptr};
     QLabel* m_simSpeedLabel{nullptr};
@@ -285,6 +299,9 @@ private:
     bool m_forceCpuInference{false};
     std::unique_ptr<render::SimulationController> m_simulation;
     tp::UserParams m_lastUserParams{};
+    std::unique_ptr<sim::StockGridSummary> m_lastSimulationSummary;
+    bool m_hasSimulationSummary{false};
+    double m_lastSimulationCellSize{0.5};
     QLabel* m_statusGpuLabel{nullptr};
     QLabel* m_statusAiLabel{nullptr};
     QLabel* m_statusFpsLabel{nullptr};

@@ -1,13 +1,11 @@
 #include "ai/TorchAI.h"
 
+#include "ai/ModelCard.h"
 #include "render/Model.h"
 #include "tp/ToolpathGenerator.h"
 
 #include <QtCore/QDebug>
-#include <QtCore/QFile>
-#include <QtCore/QJsonArray>
-#include <QtCore/QJsonDocument>
-#include <QtCore/QJsonObject>
+#include <QtCore/QDir>
 #include <QtCore/QStringList>
 #include <QtGui/QVector3D>
 
@@ -33,62 +31,6 @@ QString toQString(const std::filesystem::path& path)
 #endif
 }
 
-std::size_t readInputDimFromSchema(const std::filesystem::path& path)
-{
-    if (path.empty())
-    {
-        return 0;
-    }
-
-    const QString schemaPath = toQString(path);
-    QFile file(schemaPath);
-    if (!file.exists())
-    {
-        return 0;
-    }
-    if (!file.open(QIODevice::ReadOnly))
-    {
-        qWarning().noquote() << "TorchAI: unable to open schema" << schemaPath << "-" << file.errorString();
-        return 0;
-    }
-    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-    if (!doc.isObject())
-    {
-        return 0;
-    }
-    const QJsonObject root = doc.object();
-    const QJsonObject interface = root.value(QStringLiteral("interface")).toObject();
-    const QJsonArray inputs = interface.value(QStringLiteral("inputs")).toArray();
-    if (inputs.isEmpty() || !inputs.first().isObject())
-    {
-        return 0;
-    }
-    const QJsonObject firstInput = inputs.first().toObject();
-    const QJsonValue shapeValue = firstInput.value(QStringLiteral("shape"));
-    if (shapeValue.isArray())
-    {
-        const QJsonArray shapeArray = shapeValue.toArray();
-        if (shapeArray.size() >= 2)
-        {
-            const QJsonValue dimValue = shapeArray.at(1);
-            if (dimValue.isDouble())
-            {
-                return static_cast<std::size_t>(dimValue.toInt());
-            }
-            if (dimValue.isString())
-            {
-                bool ok = false;
-                const int parsed = dimValue.toString().toInt(&ok);
-                if (ok && parsed > 0)
-                {
-                    return static_cast<std::size_t>(parsed);
-                }
-            }
-        }
-    }
-    return 0;
-}
-
 #ifdef AI_WITH_TORCH
 void assignTensor(torch::Tensor& target, const c10::IValue& value)
 {
@@ -107,8 +49,19 @@ namespace ai
 TorchAI::TorchAI(std::filesystem::path modelPath)
     : m_modelPath(std::move(modelPath))
 {
-#ifdef AI_WITH_TORCH
     if (!m_modelPath.empty())
+    {
+        std::string cardError;
+        m_modelCard = ModelCard::loadForModel(m_modelPath, ModelCard::Backend::Torch, cardError);
+        if (!m_modelCard.has_value())
+        {
+            m_lastError = cardError;
+            qWarning().noquote() << "TorchAI: model card validation failed -"
+                                 << QString::fromStdString(cardError);
+        }
+    }
+#ifdef AI_WITH_TORCH
+    if (!m_modelPath.empty() && m_modelCard.has_value())
     {
         try
         {
@@ -140,6 +93,12 @@ TorchAI::TorchAI(std::filesystem::path modelPath)
     m_hasCuda = false;
     m_device = "CPU (stub)";
 #endif
+    if (!m_modelCard.has_value() && !m_modelPath.empty() && m_lastError.empty())
+    {
+        m_lastError = QStringLiteral("Model card missing for %1.")
+                          .arg(QDir::toNativeSeparators(toQString(m_modelPath)))
+                          .toStdString();
+    }
     m_expectedInputSize = resolveExpectedInputSize();
     configureDevice();
 }
@@ -322,11 +281,18 @@ void TorchAI::configureDevice()
 {
 #ifdef AI_WITH_TORCH
     m_useCuda = false;
+    m_loggedDeviceInfo = false;
 
     if (!m_loaded)
     {
         m_deviceObject = torch::Device(torch::kCPU);
         m_device = (m_forceCpu && m_hasCuda) ? "CPU (forced)" : "CPU";
+        if (!m_loggedDeviceInfo)
+        {
+            qInfo().noquote() << "TorchAI: module not loaded, using device:" << QString::fromStdString(m_device)
+                              << "(cuda available:" << (m_hasCuda ? "yes" : "no") << ")";
+            m_loggedDeviceInfo = true;
+        }
         return;
     }
 
@@ -375,36 +341,22 @@ void TorchAI::configureDevice()
     m_useCuda = false;
     m_hasCuda = false;
 #endif
+    if (!m_loggedDeviceInfo)
+    {
+        qInfo().noquote() << "TorchAI: cuda available:" << (m_hasCuda ? "yes" : "no")
+                          << "forceCpu:" << (m_forceCpu ? "yes" : "no")
+                          << "device:" << QString::fromStdString(m_device);
+        m_loggedDeviceInfo = true;
+    }
     m_loggedFeaturePreview = false;
 }
 
 std::size_t TorchAI::parseExpectedInputSizeFromArtifacts() const
 {
-    if (m_modelPath.empty())
+    if (m_modelCard.has_value())
     {
-        return 0;
+        return m_modelCard->featureCount;
     }
-
-    std::vector<std::filesystem::path> candidates;
-    candidates.emplace_back(m_modelPath.string() + ".card.json");
-
-    std::filesystem::path baseNoExt = m_modelPath;
-    baseNoExt.replace_extension();
-    candidates.emplace_back(baseNoExt.string() + ".card.json");
-    candidates.emplace_back(baseNoExt.string() + ".onnx.json");
-
-    std::filesystem::path schemaPath = m_modelPath;
-    schemaPath += ".onnx.json";
-    candidates.emplace_back(schemaPath);
-
-    for (const auto& candidate : candidates)
-    {
-        if (const auto size = readInputDimFromSchema(candidate); size > 0)
-        {
-            return size;
-        }
-    }
-
     return 0;
 }
 

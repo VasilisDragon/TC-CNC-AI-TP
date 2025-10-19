@@ -2,6 +2,7 @@
 
 #include "ai/FeatureExtractor.h"
 #include "ai/IPathAI.h"
+#include "ai/ModelCard.h"
 
 #include <filesystem>
 #include <optional>
@@ -46,6 +47,7 @@ private:
                                                     const tp::UserParams& params) const;
 
     std::filesystem::path m_modelPath;
+    std::optional<ModelCard> m_modelCard;
     bool m_loaded{false};
     bool m_forceCpu{false};
     bool m_useCuda{false};
@@ -56,6 +58,7 @@ private:
     std::size_t m_expectedInputSize{0};
     mutable bool m_warnedFeatureSize{false};
     mutable bool m_loggedFeaturePreview{false};
+    mutable bool m_loggedDeviceInfo{false};
 
 #ifdef AI_WITH_TORCH
     torch::jit::script::Module m_module;

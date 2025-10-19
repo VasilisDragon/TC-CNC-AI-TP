@@ -141,6 +141,69 @@ void appendPolyline(std::vector<Polyline>& passes,
     }
 }
 
+glm::dvec2 normalize2D(const glm::dvec2& dir)
+{
+    const double len = glm::length(dir);
+    if (len <= kPositionEpsilon)
+    {
+        return {1.0, 0.0};
+    }
+    return dir / len;
+}
+
+void pruneSequentialDuplicates(std::vector<glm::dvec3>& points)
+{
+    if (points.size() < 2)
+    {
+        return;
+    }
+
+    std::vector<glm::dvec3> pruned;
+    pruned.reserve(points.size());
+    glm::dvec3 prev = points.front();
+    pruned.push_back(prev);
+
+    for (std::size_t i = 1; i < points.size(); ++i)
+    {
+        if (nearlyEqual(prev, points[i]))
+        {
+            continue;
+        }
+        prev = points[i];
+        pruned.push_back(prev);
+    }
+
+    points = std::move(pruned);
+}
+
+void appendCutPolyline(std::vector<Polyline>& passes, const std::vector<glm::dvec3>& points)
+{
+    if (points.size() < 2)
+    {
+        return;
+    }
+
+    Polyline poly;
+    poly.motion = MotionType::Cut;
+
+    glm::dvec3 prev = points.front();
+    poly.pts.push_back({toVec3(prev)});
+    for (std::size_t i = 1; i < points.size(); ++i)
+    {
+        if (nearlyEqual(prev, points[i]))
+        {
+            continue;
+        }
+        prev = points[i];
+        poly.pts.push_back({toVec3(prev)});
+    }
+
+    if (poly.pts.size() >= 2)
+    {
+        passes.push_back(std::move(poly));
+    }
+}
+
 glm::dvec2 selectDirection2D(const std::vector<glm::dvec3>& points, bool forward)
 {
     if (points.size() < 2)
@@ -222,11 +285,73 @@ double horizontalDistance(const glm::dvec3& a, const glm::dvec3& b)
     return std::sqrt(dx * dx + dy * dy);
 }
 
+std::vector<glm::dvec3> buildHelicalEntry(const glm::dvec3& targetPoint,
+                                          const glm::dvec2& nominalDir,
+                                          double clearanceZ,
+                                          double entryDrop,
+                                          double rampAngleRad,
+                                          double radius)
+{
+    if (entryDrop <= kPositionEpsilon || radius <= kPositionEpsilon)
+    {
+        return {};
+    }
+
+    const double tanValue = std::tan(std::max(rampAngleRad, 1e-3));
+    const double circumference = 2.0 * std::numbers::pi * radius;
+    double verticalPerTurn = (tanValue > 1e-6) ? circumference * tanValue : entryDrop;
+    if (!std::isfinite(verticalPerTurn) || verticalPerTurn <= 1e-6)
+    {
+        verticalPerTurn = entryDrop;
+    }
+
+    const double baseTurns = std::max(entryDrop / verticalPerTurn, 0.25);
+    const double totalTurns = std::min(baseTurns + 0.25, 6.0); // clamp for runtime safety
+    const double thetaStart = totalTurns * 2.0 * std::numbers::pi;
+    const double thetaEnd = 0.0;
+    const double thetaSpan = thetaStart - thetaEnd;
+
+    const int segmentsPerTurn = 18;
+    int totalSegments = static_cast<int>(std::ceil(totalTurns * segmentsPerTurn));
+    totalSegments = std::clamp(totalSegments, 12, 360);
+
+    const glm::dvec2 tangent = normalize2D(nominalDir);
+    glm::dvec2 normal{-tangent.y, tangent.x};
+    normal = normalize2D(normal);
+    glm::dvec2 radialBase = -tangent;
+
+    std::vector<glm::dvec3> helix;
+    helix.reserve(static_cast<std::size_t>(totalSegments) + 1);
+
+    for (int i = 0; i <= totalSegments; ++i)
+    {
+        const double progress = static_cast<double>(i) / static_cast<double>(totalSegments);
+        const double theta = thetaStart - thetaSpan * progress;
+        const double cosTheta = std::cos(theta);
+        const double sinTheta = std::sin(theta);
+        const double scale = radius * (1.0 - progress);
+
+        const glm::dvec2 radial = radialBase * cosTheta + normal * sinTheta;
+        glm::dvec3 point;
+        point.x = targetPoint.x + radial.x * scale;
+        point.y = targetPoint.y + radial.y * scale;
+        point.z = clearanceZ - entryDrop * progress;
+        helix.push_back(point);
+    }
+
+    if (helix.empty() || !nearlyEqual(helix.back(), targetPoint))
+    {
+        helix.push_back(targetPoint);
+    }
+
+    pruneSequentialDuplicates(helix);
+    return helix;
+}
+
 void applyMachineMotion(Toolpath& toolpath,
                         const Machine& machine,
                         const Stock& stock,
-                        double rampAngleDeg,
-                        double toolDiameter)
+                        const UserParams& params)
 {
     if (toolpath.passes.empty())
     {
@@ -242,11 +367,18 @@ void applyMachineMotion(Toolpath& toolpath,
         safeZ = clearanceZ + kMinSafeGap;
     }
 
-    const double requestedRamp = std::isfinite(rampAngleDeg) ? rampAngleDeg : kDefaultRampAngleDeg;
+    const double requestedRamp = std::isfinite(params.rampAngleDeg) ? params.rampAngleDeg : kDefaultRampAngleDeg;
     const double rampAngleRad = std::clamp(requestedRamp, kMinRampAngleDeg, kMaxRampAngleDeg) * std::numbers::pi / 180.0;
-    const double safeToolDiameter = std::max(toolDiameter, 0.1);
+    const double safeToolDiameter = std::max(params.toolDiameter, 0.1);
     const double minHorizontal = std::max(kMinRampHorizontalFactor * safeToolDiameter, 0.25);
     const double maxHorizontal = std::max(kMaxRampHorizontalFactor * safeToolDiameter, minHorizontal * 2.0);
+    const bool enableRamp = params.enableRamp;
+    const bool enableHelical = params.enableHelical;
+    const double leadIn = std::max(params.leadInLength, 0.0);
+    const double leadOut = std::max(params.leadOutLength, 0.0);
+    const double rampRadius = (params.rampRadius > kPositionEpsilon)
+                                  ? params.rampRadius
+                                  : safeToolDiameter * 0.5;
 
     std::vector<Polyline> result;
     result.reserve(toolpath.passes.size() * 5);
@@ -262,39 +394,78 @@ void applyMachineMotion(Toolpath& toolpath,
         }
 
         std::vector<glm::dvec3> cutPoints;
-        cutPoints.reserve(poly.pts.size());
+        cutPoints.reserve(poly.pts.size() + 2);
         for (const Vertex& vertex : poly.pts)
         {
             cutPoints.emplace_back(toDVec3(vertex.p));
         }
 
-        const glm::dvec3& startCut = cutPoints.front();
-        const glm::dvec3& endCut = cutPoints.back();
+        glm::dvec2 entryDir = selectDirection2D(cutPoints, true);
+        glm::dvec2 exitDir = selectDirection2D(cutPoints, false);
 
-        const double entryDrop = std::max(0.0, clearanceZ - startCut.z);
-        const double exitDrop = std::max(0.0, clearanceZ - endCut.z);
-        const bool needRampIn = entryDrop > kPositionEpsilon;
-        const bool needRampOut = exitDrop > kPositionEpsilon;
+        std::vector<glm::dvec3> pathPoints;
+        pathPoints.reserve(cutPoints.size() + 2);
 
-        const glm::dvec2 entryDir = selectDirection2D(cutPoints, true);
-        const glm::dvec2 exitDir = selectDirection2D(cutPoints, false);
+        if (leadIn > kPositionEpsilon)
+        {
+            const glm::dvec3 leadStart = offsetPoint(cutPoints.front(), entryDir, leadIn, cutPoints.front().z, true);
+            pathPoints.push_back(leadStart);
+        }
 
-        const double entryHorizontal = needRampIn
-                                           ? computeRampDistance(entryDrop, rampAngleRad, minHorizontal, maxHorizontal)
-                                           : 0.0;
-        const double exitHorizontal = needRampOut
-                                          ? computeRampDistance(exitDrop, rampAngleRad, minHorizontal, maxHorizontal)
-                                          : 0.0;
+        pathPoints.insert(pathPoints.end(), cutPoints.begin(), cutPoints.end());
 
-        glm::dvec3 entryClear = needRampIn
-                                    ? offsetPoint(startCut, entryDir, entryHorizontal, clearanceZ, true)
-                                    : glm::dvec3{startCut.x, startCut.y, clearanceZ};
-        glm::dvec3 exitClear = needRampOut
-                                   ? offsetPoint(endCut, exitDir, exitHorizontal, clearanceZ, false)
-                                   : glm::dvec3{endCut.x, endCut.y, clearanceZ};
+        if (leadOut > kPositionEpsilon)
+        {
+            const glm::dvec3 leadEnd = offsetPoint(cutPoints.back(), exitDir, leadOut, cutPoints.back().z, false);
+            pathPoints.push_back(leadEnd);
+        }
+
+        pruneSequentialDuplicates(pathPoints);
+        if (pathPoints.size() < 2)
+        {
+            continue;
+        }
+
+        entryDir = selectDirection2D(pathPoints, true);
+        exitDir = selectDirection2D(pathPoints, false);
+
+        const glm::dvec3& entryPoint = pathPoints.front();
+        const glm::dvec3& exitPoint = pathPoints.back();
+        const double entryDrop = std::max(0.0, clearanceZ - entryPoint.z);
+        const double exitDrop = std::max(0.0, clearanceZ - exitPoint.z);
+
+        std::vector<glm::dvec3> entryPath;
+        glm::dvec3 entryClear{entryPoint.x, entryPoint.y, (entryDrop > kPositionEpsilon) ? clearanceZ : entryPoint.z};
+
+        if (entryDrop > kPositionEpsilon)
+        {
+            if (enableHelical)
+            {
+                entryPath = buildHelicalEntry(entryPoint, entryDir, clearanceZ, entryDrop, rampAngleRad, rampRadius);
+            }
+
+            if (entryPath.empty())
+            {
+                if (enableRamp)
+                {
+                    const double entryHorizontal = computeRampDistance(entryDrop, rampAngleRad, minHorizontal, maxHorizontal);
+                    entryClear = offsetPoint(entryPoint, entryDir, entryHorizontal, clearanceZ, true);
+                }
+                else
+                {
+                    entryClear = {entryPoint.x, entryPoint.y, clearanceZ};
+                }
+                entryPath = {entryClear, entryPoint};
+            }
+            else
+            {
+                entryClear = entryPath.front();
+            }
+        }
+
+        pruneSequentialDuplicates(entryPath);
 
         glm::dvec3 entrySafe{entryClear.x, entryClear.y, safeZ};
-        glm::dvec3 exitSafe{exitClear.x, exitClear.y, safeZ};
 
         if (!haveLast)
         {
@@ -306,33 +477,26 @@ void applyMachineMotion(Toolpath& toolpath,
             appendPolyline(result, MotionType::Rapid, {entrySafe, entryClear});
         }
 
-        if (!nearlyEqual(entryClear, startCut))
+        appendCutPolyline(result, entryPath);
+        appendCutPolyline(result, pathPoints);
+
+        std::vector<glm::dvec3> exitPath;
+        glm::dvec3 exitClear{exitPoint.x, exitPoint.y, (exitDrop > kPositionEpsilon) ? clearanceZ : exitPoint.z};
+
+        if (exitDrop > kPositionEpsilon)
         {
-            Polyline rampIn;
-            rampIn.motion = MotionType::Cut;
-            rampIn.pts.push_back({toVec3(entryClear)});
-            rampIn.pts.push_back({toVec3(startCut)});
-            result.push_back(std::move(rampIn));
+            if (enableRamp)
+            {
+                const double exitHorizontal = computeRampDistance(exitDrop, rampAngleRad, minHorizontal, maxHorizontal);
+                exitClear = offsetPoint(exitPoint, exitDir, exitHorizontal, clearanceZ, false);
+            }
+            exitPath = {exitPoint, exitClear};
         }
 
-        Polyline cutPoly;
-        cutPoly.motion = MotionType::Cut;
-        cutPoly.pts.reserve(cutPoints.size());
-        for (const auto& pt : cutPoints)
-        {
-            cutPoly.pts.push_back({toVec3(pt)});
-        }
-        result.push_back(std::move(cutPoly));
+        pruneSequentialDuplicates(exitPath);
+        appendCutPolyline(result, exitPath);
 
-        if (!nearlyEqual(endCut, exitClear))
-        {
-            Polyline rampOut;
-            rampOut.motion = MotionType::Cut;
-            rampOut.pts.push_back({toVec3(endCut)});
-            rampOut.pts.push_back({toVec3(exitClear)});
-            result.push_back(std::move(rampOut));
-        }
-
+        glm::dvec3 exitSafe{exitClear.x, exitClear.y, safeZ};
         appendPolyline(result, MotionType::Rapid, {exitClear, exitSafe});
 
         lastSafe = exitSafe;
@@ -663,7 +827,7 @@ void finalizeToolpath(Toolpath& toolpath, const UserParams& params)
     toolpath.machine = machine;
     toolpath.stock = stock;
 
-    applyMachineMotion(toolpath, machine, stock, params.rampAngleDeg, params.toolDiameter);
+    applyMachineMotion(toolpath, machine, stock, params);
 }
 
 } // namespace
@@ -1123,6 +1287,11 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
                                               static_cast<float>(cutZ))});
             }
 
+            if (params.cutDirection == UserParams::CutDirection::Conventional)
+            {
+                std::reverse(poly.pts.begin(), poly.pts.end());
+            }
+
             toolpath.passes.push_back(std::move(poly));
         }
 
@@ -1306,6 +1475,10 @@ Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
                                                        static_cast<float>(pt.y),
                                                        static_cast<float>(targetZ))});
                     }
+                    if (params.cutDirection == UserParams::CutDirection::Conventional)
+                    {
+                        std::reverse(poly.pts.begin(), poly.pts.end());
+                    }
                     toolpath.passes.push_back(std::move(poly));
                     ++loopCount;
                 }
@@ -1433,6 +1606,10 @@ Toolpath ToolpathGenerator::generateFallbackRaster(const render::Model& model,
         cut.motion = MotionType::Cut;
         cut.pts.push_back({startCut});
         cut.pts.push_back({endCut});
+        if (params.cutDirection == UserParams::CutDirection::Conventional)
+        {
+            std::reverse(cut.pts.begin(), cut.pts.end());
+        }
         toolpath.passes.push_back(std::move(cut));
 
         if (progressCallback)

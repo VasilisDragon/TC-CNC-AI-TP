@@ -4,6 +4,7 @@
 #include "render/Model.h"
 #include "render/SimulationController.h"
 #include "render/ToolpathOverlay.h"
+#include "render/HeatmapOverlay.h"
 
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QString>
@@ -44,6 +45,11 @@ public:
     void setToolpath(std::shared_ptr<tp::Toolpath> toolpath);
     void setSimulationController(SimulationController* controller);
 
+    void setHeatmapPoints(std::vector<HeatmapPoint> points);
+    void clearHeatmap();
+    void setHeatmapVisible(bool visible);
+    [[nodiscard]] bool heatmapVisible() const noexcept;
+
     void resetCamera();
     void setViewPreset(ViewPreset preset);
 
@@ -74,6 +80,7 @@ private:
 
     std::unique_ptr<QOpenGLShaderProgram> m_meshProgram;
     std::unique_ptr<QOpenGLShaderProgram> m_polylineProgram;
+    std::unique_ptr<QOpenGLShaderProgram> m_heatmapProgram;
 
     std::unique_ptr<QOpenGLBuffer> m_vertexBuffer;
     std::unique_ptr<QOpenGLBuffer> m_indexBuffer;
@@ -86,6 +93,11 @@ private:
     std::unique_ptr<QOpenGLBuffer> m_simVertexBuffer;
     std::unique_ptr<QOpenGLBuffer> m_simIndexBuffer;
     std::unique_ptr<QOpenGLVertexArrayObject> m_simVao;
+
+    HeatmapOverlay m_heatmapOverlay;
+    bool m_heatmapVisible{false};
+    float m_heatmapAlpha{0.55f};
+    float m_heatmapPointSize{6.5f};
 
     int m_vertexCount{0};
     int m_indexCount{0};

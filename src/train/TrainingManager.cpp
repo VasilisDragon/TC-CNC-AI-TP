@@ -256,7 +256,8 @@ void TrainingManager::enqueueTraining(const TrainJobRequest& request)
     const QString torchFile = QDir(modelsRoot()).filePath(modelBase + QStringLiteral(".pt"));
     const QString onnxFile = QDir(modelsRoot()).filePath(modelBase + QStringLiteral(".onnx"));
     const QString schemaFile = QDir(modelsRoot()).filePath(modelBase + QStringLiteral(".onnx.json"));
-    const QString cardFile = QDir(modelsRoot()).filePath(modelBase + QStringLiteral(".card.json"));
+    const QString torchCardFile = QDir(modelsRoot()).filePath(modelBase + QStringLiteral(".pt.model.json"));
+    const QString onnxCardFile = QDir(modelsRoot()).filePath(modelBase + QStringLiteral(".onnx.model.json"));
 
     auto job = std::make_unique<Job>();
     job->id = QUuid::createUuid();
@@ -277,7 +278,8 @@ void TrainingManager::enqueueTraining(const TrainJobRequest& request)
         torchFile,
         onnxFile,
         schemaFile,
-        cardFile,
+        torchCardFile,
+        onnxCardFile,
     };
 
     queueJob(std::move(job));
@@ -396,7 +398,8 @@ void TrainingManager::startJob(Job& job)
         arguments << QStringLiteral("--torchscript-name") << QFileInfo(payload.torchFile).fileName();
         arguments << QStringLiteral("--onnx-name") << QFileInfo(payload.onnxFile).fileName();
         arguments << QStringLiteral("--onnx-json-name") << QFileInfo(payload.schemaFile).fileName();
-        arguments << QStringLiteral("--model-card-name") << QFileInfo(payload.cardFile).fileName();
+        arguments << QStringLiteral("--torch-card-name") << QFileInfo(payload.torchCardFile).fileName();
+        arguments << QStringLiteral("--onnx-card-name") << QFileInfo(payload.onnxCardFile).fileName();
         arguments << QStringLiteral("--samples");
 
         int sampleCount = 0;
@@ -667,12 +670,14 @@ void TrainingManager::finalizeTrainingJob(Job& job, bool success)
     const QString workTorch = QDir(payload.workDir).filePath(QFileInfo(payload.torchFile).fileName());
     const QString workOnnx = QDir(payload.workDir).filePath(QFileInfo(payload.onnxFile).fileName());
     const QString workSchema = QDir(payload.workDir).filePath(QFileInfo(payload.schemaFile).fileName());
-    const QString workCard = QDir(payload.workDir).filePath(QFileInfo(payload.cardFile).fileName());
+    const QString workTorchCard = QDir(payload.workDir).filePath(QFileInfo(payload.torchCardFile).fileName());
+    const QString workOnnxCard = QDir(payload.workDir).filePath(QFileInfo(payload.onnxCardFile).fileName());
 
     moveWithOverwrite(workTorch, payload.torchFile);
     moveWithOverwrite(workOnnx, payload.onnxFile);
     moveWithOverwrite(workSchema, payload.schemaFile);
-    moveWithOverwrite(workCard, payload.cardFile);
+    moveWithOverwrite(workTorchCard, payload.torchCardFile);
+    moveWithOverwrite(workOnnxCard, payload.onnxCardFile);
 
     QDir(payload.workDir).removeRecursively();
 
@@ -683,7 +688,7 @@ void TrainingManager::finalizeTrainingJob(Job& job, bool success)
 
     emit modelRegistered(payload.torchFile);
 
-    QFile card(payload.cardFile);
+    QFile card(payload.torchCardFile);
     if (card.open(QIODevice::ReadOnly | QIODevice::Text))
     {
         const QJsonDocument doc = QJsonDocument::fromJson(card.readAll());

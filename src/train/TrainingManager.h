@@ -132,7 +132,8 @@ private:
         QString torchFile;
         QString onnxFile;
         QString schemaFile;
-        QString cardFile;
+        QString torchCardFile;
+        QString onnxCardFile;
     };
 
     struct Job

@@ -2,6 +2,7 @@
 
 #include "ai/FeatureExtractor.h"
 #include "ai/IPathAI.h"
+#include "ai/ModelCard.h"
 
 #include <filesystem>
 #include <memory>
@@ -55,6 +56,7 @@ private:
 
     std::filesystem::path m_modelPath;
     std::filesystem::path m_metadataPath;
+    std::optional<ModelCard> m_modelCard;
     std::string m_inputName{"input"};
     OutputNames m_outputs{};
     bool m_loaded{false};
@@ -67,6 +69,7 @@ private:
     std::size_t m_expectedInputSize{0};
     mutable bool m_warnedFeatureSize{false};
     mutable bool m_loggedFeaturePreview{false};
+    mutable bool m_loggedProviderInfo{false};
 
 #ifdef AI_WITH_ONNXRUNTIME
     std::unique_ptr<Ort::Session> m_session;

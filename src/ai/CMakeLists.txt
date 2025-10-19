@@ -2,6 +2,8 @@ add_library(ai STATIC
     IPathAI.h
     FeatureExtractor.h
     FeatureExtractor.cpp
+    ModelCard.h
+    ModelCard.cpp
     TorchAI.h
     TorchAI.cpp
     OnnxAI.h
@@ -46,4 +48,11 @@ if (AI_ONNX_ENABLED)
         PUBLIC
             onnxruntime::onnxruntime
     )
+    if (TARGET onnxruntime::onnxruntime_providers_cuda)
+        target_link_libraries(ai
+            PUBLIC
+                onnxruntime::onnxruntime_providers_cuda
+        )
+        target_compile_definitions(ai PUBLIC AI_ONNX_WITH_CUDA=1)
+    endif()
 endif()

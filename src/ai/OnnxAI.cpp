@@ -1,11 +1,12 @@
 #include "ai/OnnxAI.h"
 
+#include "ai/ModelCard.h"
 #include "render/Model.h"
 #include "tp/ToolpathGenerator.h"
 
 #include <QtCore/QDebug>
+#include <QtCore/QDir>
 #include <QtCore/QFile>
-#include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QStringList>
@@ -28,63 +29,6 @@ QString toQString(const std::filesystem::path& path)
 #else
     return QString::fromStdString(path.string());
 #endif
-}
-
-std::size_t readInputDimFromSchema(const std::filesystem::path& path)
-{
-    if (path.empty())
-    {
-        return 0;
-    }
-
-    const QString schemaPath = toQString(path);
-    QFile file(schemaPath);
-    if (!file.exists())
-    {
-        return 0;
-    }
-    if (!file.open(QIODevice::ReadOnly))
-    {
-        qWarning().noquote() << "OnnxAI: unable to open schema" << schemaPath << "-" << file.errorString();
-        return 0;
-    }
-
-    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-    if (!doc.isObject())
-    {
-        return 0;
-    }
-    const QJsonObject root = doc.object();
-    const QJsonObject interface = root.value(QStringLiteral("interface")).toObject();
-    const QJsonArray inputs = interface.value(QStringLiteral("inputs")).toArray();
-    if (inputs.isEmpty() || !inputs.first().isObject())
-    {
-        return 0;
-    }
-    const QJsonObject firstInput = inputs.first().toObject();
-    const QJsonValue shapeValue = firstInput.value(QStringLiteral("shape"));
-    if (shapeValue.isArray())
-    {
-        const QJsonArray shapeArray = shapeValue.toArray();
-        if (shapeArray.size() >= 2)
-        {
-            const QJsonValue dimValue = shapeArray.at(1);
-            if (dimValue.isDouble())
-            {
-                return static_cast<std::size_t>(dimValue.toInt());
-            }
-            if (dimValue.isString())
-            {
-                bool ok = false;
-                const int parsed = dimValue.toString().toInt(&ok);
-                if (ok && parsed > 0)
-                {
-                    return static_cast<std::size_t>(parsed);
-                }
-            }
-        }
-    }
-    return 0;
 }
 
 #ifdef AI_WITH_ONNXRUNTIME
@@ -110,6 +54,14 @@ OnnxAI::OnnxAI(std::filesystem::path modelPath)
 {
     if (!m_modelPath.empty())
     {
+        std::string cardError;
+        m_modelCard = ModelCard::loadForModel(m_modelPath, ModelCard::Backend::Onnx, cardError);
+        if (!m_modelCard.has_value())
+        {
+            m_lastError = cardError;
+            qWarning().noquote() << "OnnxAI: model card validation failed -"
+                                 << QString::fromStdString(cardError);
+        }
         loadMetadata();
     }
 #ifdef AI_WITH_ONNXRUNTIME
@@ -286,6 +238,7 @@ void OnnxAI::configureSession()
     m_lastError.clear();
     m_hasCuda = false;
     m_session.reset();
+    m_loggedProviderInfo = false;
 
     if (m_modelPath.empty())
     {
@@ -294,12 +247,43 @@ void OnnxAI::configureSession()
         return;
     }
 
+    if (!m_modelCard.has_value())
+    {
+        if (m_lastError.empty())
+        {
+            m_lastError = QStringLiteral("Model card missing for %1.")
+                              .arg(QDir::toNativeSeparators(toQString(m_modelPath)))
+                              .toStdString();
+        }
+        m_expectedInputSize = FeatureExtractor::featureCount() + 2;
+        m_warnedFeatureSize = false;
+        m_loggedFeaturePreview = false;
+        return;
+    }
+
     const std::vector<std::string> providers = Ort::GetAvailableProviders();
     m_hasCuda = hasProvider(providers, "CUDAExecutionProvider");
+    if (!m_loggedProviderInfo)
+    {
+        QStringList availableList;
+        for (const auto& provider : providers)
+        {
+            availableList << QString::fromStdString(provider);
+        }
+        if (availableList.isEmpty())
+        {
+            availableList << QStringLiteral("(none)");
+        }
+        qInfo().noquote() << "OnnxAI: available providers -" << availableList.join(QStringLiteral(", "));
+        qInfo().noquote() << "OnnxAI: CUDA detected:" << (m_hasCuda ? "yes" : "no")
+                          << "forceCpu:" << (m_forceCpu ? "yes" : "no");
+        m_loggedProviderInfo = true;
+    }
 
     Ort::SessionOptions options;
     options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
+    QStringList requestedProviders;
     const bool cudaRequested = m_hasCuda && !m_forceCpu;
     if (cudaRequested)
     {
@@ -310,6 +294,7 @@ void OnnxAI::configureSession()
             options.AppendExecutionProvider_CUDA(cudaOptions);
             m_useCuda = true;
             m_device = "CUDA";
+            requestedProviders << QStringLiteral("CUDAExecutionProvider");
         }
         catch (const Ort::Exception& e)
         {
@@ -322,6 +307,14 @@ void OnnxAI::configureSession()
     if (!m_useCuda)
     {
         m_device = (m_forceCpu && m_hasCuda) ? "CPU (forced)" : "CPU";
+        if (!requestedProviders.contains(QStringLiteral("CPUExecutionProvider")))
+        {
+            requestedProviders << QStringLiteral("CPUExecutionProvider");
+        }
+    }
+    else if (!requestedProviders.contains(QStringLiteral("CPUExecutionProvider")))
+    {
+        requestedProviders << QStringLiteral("CPUExecutionProvider");
     }
 
     try
@@ -346,6 +339,15 @@ void OnnxAI::configureSession()
     }
 
     m_expectedInputSize = resolveExpectedInputSize();
+    if (!requestedProviders.isEmpty())
+    {
+        qInfo().noquote() << "OnnxAI: configured providers -" << requestedProviders.join(QStringLiteral(", "))
+                          << "device:" << QString::fromStdString(m_device);
+    }
+    else
+    {
+        qInfo().noquote() << "OnnxAI: configured device:" << QString::fromStdString(m_device);
+    }
 #else
     m_loaded = false;
     m_useCuda = false;
@@ -411,34 +413,10 @@ bool OnnxAI::loadMetadata()
 
 std::size_t OnnxAI::parseExpectedInputSizeFromArtifacts() const
 {
-    std::vector<std::filesystem::path> candidates;
-    if (!m_modelPath.empty())
+    if (m_modelCard.has_value())
     {
-        candidates.emplace_back(m_modelPath.string() + ".card.json");
-
-        std::filesystem::path baseNoExt = m_modelPath;
-        baseNoExt.replace_extension();
-        candidates.emplace_back(baseNoExt.string() + ".card.json");
-        candidates.emplace_back(baseNoExt.string() + ".onnx.json");
-
-        std::filesystem::path schemaPath = m_modelPath;
-        schemaPath += ".onnx.json";
-        candidates.emplace_back(schemaPath);
+        return m_modelCard->featureCount;
     }
-
-    if (!m_metadataPath.empty())
-    {
-        candidates.emplace_back(m_metadataPath);
-    }
-
-    for (const auto& candidate : candidates)
-    {
-        if (const auto size = readInputDimFromSchema(candidate); size > 0)
-        {
-            return size;
-        }
-    }
-
     return 0;
 }
 

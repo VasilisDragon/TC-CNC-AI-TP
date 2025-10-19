@@ -56,6 +56,8 @@ void ModelViewerWidget::setModel(std::shared_ptr<Model> model)
     m_toolpath.reset();
     rebuildGridGeometry();
     m_toolpathOverlay.clear();
+    m_heatmapOverlay.clear();
+    m_heatmapVisible = false;
     m_toolpathDirty = false;
     m_camera.reset();
     m_meshBuffersDirty = true;
@@ -72,6 +74,8 @@ void ModelViewerWidget::clearModel()
     m_meshBuffersDirty = true;
     rebuildGridGeometry();
     m_toolpathOverlay.clear();
+    m_heatmapOverlay.clear();
+    m_heatmapVisible = false;
     m_toolpathDirty = false;
     m_simVisible = false;
     update();
@@ -82,6 +86,8 @@ void ModelViewerWidget::setToolpath(std::shared_ptr<tp::Toolpath> toolpath)
     m_toolpath = std::move(toolpath);
     m_toolpathDirty = true;
     m_simVisible = false;
+    m_heatmapOverlay.clear();
+    m_heatmapVisible = false;
     update();
 }
 
@@ -113,6 +119,39 @@ void ModelViewerWidget::setSimulationController(SimulationController* controller
                     update();
                 });
     }
+}
+
+void ModelViewerWidget::setHeatmapPoints(std::vector<HeatmapPoint> points)
+{
+    m_heatmapOverlay.updateGeometry(std::move(points));
+    if (m_heatmapVisible)
+    {
+        update();
+    }
+}
+
+void ModelViewerWidget::clearHeatmap()
+{
+    m_heatmapOverlay.clear();
+    if (m_heatmapVisible)
+    {
+        update();
+    }
+}
+
+void ModelViewerWidget::setHeatmapVisible(bool visible)
+{
+    if (m_heatmapVisible == visible)
+    {
+        return;
+    }
+    m_heatmapVisible = visible;
+    update();
+}
+
+bool ModelViewerWidget::heatmapVisible() const noexcept
+{
+    return m_heatmapVisible && !m_heatmapOverlay.isEmpty();
 }
 
 void ModelViewerWidget::resetCamera()
@@ -172,6 +211,7 @@ void ModelViewerWidget::initializeGL()
     glEnable(GL_MULTISAMPLE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_PROGRAM_POINT_SIZE);
     glClearColor(0.08f, 0.09f, 0.11f, 1.0f);
 
     if (!m_rendererReported)
@@ -199,6 +239,11 @@ void ModelViewerWidget::initializeGL()
     m_polylineProgram->addShaderFromSourceFile(QOpenGLShader::Fragment, QStringLiteral(":/render/shaders/polyline.frag"));
     m_polylineProgram->link();
 
+    m_heatmapProgram = std::make_unique<QOpenGLShaderProgram>();
+    m_heatmapProgram->addShaderFromSourceFile(QOpenGLShader::Vertex, QStringLiteral(":/render/shaders/heatmap.vert"));
+    m_heatmapProgram->addShaderFromSourceFile(QOpenGLShader::Fragment, QStringLiteral(":/render/shaders/heatmap.frag"));
+    m_heatmapProgram->link();
+
     m_vertexBuffer = std::make_unique<QOpenGLBuffer>(QOpenGLBuffer::VertexBuffer);
     m_vertexBuffer->create();
     m_indexBuffer = std::make_unique<QOpenGLBuffer>(QOpenGLBuffer::IndexBuffer);
@@ -207,6 +252,7 @@ void ModelViewerWidget::initializeGL()
     m_meshVao->create();
 
     m_toolpathOverlay.initialize(this);
+    m_heatmapOverlay.initialize(this);
 
     m_gridBuffer = std::make_unique<QOpenGLBuffer>(QOpenGLBuffer::VertexBuffer);
     m_gridBuffer->create();
@@ -286,6 +332,13 @@ void ModelViewerWidget::paintGL()
         m_meshVao->release();
 
         m_meshProgram->release();
+    }
+
+    if (m_heatmapProgram && m_heatmapVisible && !m_heatmapOverlay.isEmpty())
+    {
+        glDisable(GL_DEPTH_TEST);
+        m_heatmapOverlay.render(*m_heatmapProgram, mvp, m_heatmapPointSize, m_heatmapAlpha);
+        glEnable(GL_DEPTH_TEST);
     }
 
     // Draw toolpath overlay

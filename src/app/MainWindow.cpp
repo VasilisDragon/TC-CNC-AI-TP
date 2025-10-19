@@ -21,6 +21,8 @@
 #include "render/Model.h"
 #include "render/ModelViewerWidget.h"
 #include "render/SimulationController.h"
+#include "render/HeatmapOverlay.h"
+#include "sim/StockGrid.h"
 #include "train/EnvManager.h"
 #include "train/TrainingManager.h"
 
@@ -36,6 +38,7 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
 #include <QtCore/QSettings>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QSize>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QStringList>
@@ -71,6 +74,7 @@
 #include <QProgressBar>
 #include <QProgressDialog>
 #include <QPushButton>
+#include <QInputDialog>
 #include <QSlider>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -161,6 +165,42 @@ bool runtimeLoaded(const ai::IPathAI* ai)
     }
 #endif
     return false;
+}
+
+QString userSettingsFilePath()
+{
+    static const QString path = [] {
+        QString baseDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+        if (baseDir.isEmpty())
+        {
+            baseDir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+        }
+        if (baseDir.isEmpty())
+        {
+            baseDir = QDir::currentPath();
+        }
+
+        QDir rootDir(baseDir);
+        const QString folder = rootDir.filePath(QStringLiteral("CNCTC"));
+        QDir configDir(folder);
+        if (!configDir.exists())
+        {
+            configDir.mkpath(QStringLiteral("."));
+        }
+        return configDir.filePath(QStringLiteral("cnctc.cfg"));
+    }();
+    return path;
+}
+
+QSettings& userSettings()
+{
+    static QSettings settings(userSettingsFilePath(), QSettings::IniFormat);
+    static const bool configured = [] {
+        settings.setFallbacksEnabled(false);
+        return true;
+    }();
+    (void)configured;
+    return settings;
 }
 
 QString runtimeLastError(const ai::IPathAI* ai)
@@ -259,6 +299,7 @@ MainWindow::MainWindow(QWidget* parent)
     createDockWidgets();
     createCameraToolbar();
     createSimulationToolbar();
+    updateSimulationActionState();
     loadToolLibrary();
     refreshAiModels();
     loadSettings();
@@ -415,6 +456,20 @@ void MainWindow::createMenus()
         viewMenu->addAction(resetAction.release());
 
         createUnitMenu(viewMenu);
+
+        viewMenu->addSeparator();
+        auto runSimulationAction = makeAction(this, tr("Run simulation for current path"));
+        connect(runSimulationAction.get(), &QAction::triggered, this, &MainWindow::runStockSimulation);
+        runSimulationAction->setEnabled(false);
+        m_runSimulationAction = runSimulationAction.get();
+        viewMenu->addAction(runSimulationAction.release());
+
+        auto heatmapAction = makeAction(this, tr("Show stock heatmap overlay"));
+        heatmapAction->setCheckable(true);
+        heatmapAction->setEnabled(false);
+        connect(heatmapAction.get(), &QAction::toggled, this, &MainWindow::toggleHeatmap);
+        m_showHeatmapAction = heatmapAction.get();
+        viewMenu->addAction(heatmapAction.release());
     }
 
     auto* machineMenu = menuBar()->addMenu(tr("&Machine"));
@@ -2035,6 +2090,8 @@ void MainWindow::startImportWorker(const QString& path)
                   syncStockUiFromData();
 
                   m_currentToolpath.reset();
+                m_lastSimulationSummary.reset();
+                m_hasSimulationSummary = false;
                 m_viewer->setToolpath(nullptr);
                 if (m_simulation)
                 {
@@ -2045,6 +2102,7 @@ void MainWindow::startImportWorker(const QString& path)
                 }
 
                 updateModelBrowser();
+                updateSimulationActionState();
 
                 logMessage(tr("Import finished in %1 ms.").arg(elapsed));
                 displayToolpathMessage(tr("Loaded model: %1").arg(QFileInfo(path).fileName()));
@@ -2177,6 +2235,13 @@ void MainWindow::startGenerateWorker(const tp::UserParams& settings)
                 }
 
                 const bool hadToolpath = m_currentToolpath && !m_currentToolpath->empty();
+                m_lastSimulationSummary.reset();
+                m_hasSimulationSummary = false;
+                if (m_viewer)
+                {
+                    m_viewer->clearHeatmap();
+                    m_viewer->setHeatmapVisible(false);
+                }
                 m_currentToolpath = std::move(toolpath);
                 m_viewer->setToolpath(m_currentToolpath);
 
@@ -2186,6 +2251,7 @@ void MainWindow::startGenerateWorker(const tp::UserParams& settings)
                 }
 
                 updateModelBrowser();
+                updateSimulationActionState();
 
                 const int segmentCount = static_cast<int>(m_currentToolpath->passes.size());
                 const double feedDisplay = common::fromMillimeters(m_currentToolpath->feed, m_units);
@@ -2801,7 +2867,8 @@ void MainWindow::loadSettings()
         return;
     }
 
-    QSettings settings;
+    QSettings& settings = userSettings();
+    settings.sync();
 
     const QString unitKey = settings.value(QStringLiteral("ui/unit"), common::unitKey(m_units)).toString();
     applyUnits(common::unitFromString(unitKey, m_units), true);
@@ -2819,6 +2886,16 @@ void MainWindow::loadSettings()
     params.spindle = settings.value(QStringLiteral("params/spindle"), params.spindle).toDouble();
     params.rasterAngleDeg = settings.value(QStringLiteral("params/rasterAngle"), params.rasterAngleDeg).toDouble();
     params.useHeightField = settings.value(QStringLiteral("params/useHeightField"), params.useHeightField).toBool();
+    params.enableRamp = settings.value(QStringLiteral("params/enableRamp"), params.enableRamp).toBool();
+    params.rampAngleDeg = settings.value(QStringLiteral("params/rampAngle"), params.rampAngleDeg).toDouble();
+    params.enableHelical = settings.value(QStringLiteral("params/enableHelical"), params.enableHelical).toBool();
+    params.rampRadius = settings.value(QStringLiteral("params/rampRadius"), params.rampRadius).toDouble();
+    params.leadInLength = settings.value(QStringLiteral("params/leadInLength"), params.leadInLength).toDouble();
+    params.leadOutLength = settings.value(QStringLiteral("params/leadOutLength"), params.leadOutLength).toDouble();
+    params.post.maxArcChordError_mm = settings.value(QStringLiteral("post/max_arc_chord_error"),
+                                                     params.post.maxArcChordError_mm).toDouble();
+    params.cutDirection = static_cast<tp::UserParams::CutDirection>(
+        settings.value(QStringLiteral("params/cutDirection"), static_cast<int>(params.cutDirection)).toInt());
     {
         const int cutterValue = settings.value(QStringLiteral("params/cutterType"),
                                                static_cast<int>(params.cutterType)).toInt();
@@ -2877,7 +2954,7 @@ void MainWindow::loadSettings()
 
 void MainWindow::saveSettings() const
 {
-    QSettings settings;
+    QSettings& settings = userSettings();
     settings.setValue(QStringLiteral("ui/unit"), common::unitKey(m_units));
 
     auto* self = const_cast<MainWindow*>(this);
@@ -2903,6 +2980,14 @@ void MainWindow::saveSettings() const
         settings.setValue(QStringLiteral("params/rasterAngle"), params.rasterAngleDeg);
         settings.setValue(QStringLiteral("params/useHeightField"), params.useHeightField);
         settings.setValue(QStringLiteral("params/cutterType"), static_cast<int>(params.cutterType));
+        settings.setValue(QStringLiteral("params/enableRamp"), params.enableRamp);
+        settings.setValue(QStringLiteral("params/rampAngle"), params.rampAngleDeg);
+        settings.setValue(QStringLiteral("params/enableHelical"), params.enableHelical);
+        settings.setValue(QStringLiteral("params/rampRadius"), params.rampRadius);
+        settings.setValue(QStringLiteral("params/leadInLength"), params.leadInLength);
+        settings.setValue(QStringLiteral("params/leadOutLength"), params.leadOutLength);
+        settings.setValue(QStringLiteral("params/cutDirection"), static_cast<int>(params.cutDirection));
+        settings.setValue(QStringLiteral("post/max_arc_chord_error"), params.post.maxArcChordError_mm);
     }
 
     settings.setValue(QStringLiteral("stock/originMode"), static_cast<int>(m_stockOriginMode));
@@ -2926,6 +3011,233 @@ void MainWindow::saveSettings() const
     settings.setValue(QStringLiteral("paths/lastModel"), m_currentModelPath);
     settings.setValue(QStringLiteral("ai/modelPath"), m_aiModelPath);
     settings.setValue(QStringLiteral("ai/forceCpu"), m_forceCpuInference);
+    settings.sync();
+}
+
+void MainWindow::runStockSimulation()
+{
+    if (!m_viewer)
+    {
+        return;
+    }
+
+    if (!m_currentModel || !m_currentModel->isValid())
+    {
+        QMessageBox::information(this, tr("Stock simulation"), tr("Load a model before running the stock simulation."));
+        return;
+    }
+
+    if (!m_currentToolpath || m_currentToolpath->empty())
+    {
+        QMessageBox::information(this, tr("Stock simulation"), tr("Generate a toolpath before running the stock simulation."));
+        return;
+    }
+
+    const double defaultCellDisplay = lengthDisplayFromMm(m_lastSimulationCellSize);
+    const double minCellDisplay = lengthDisplayFromMm(0.1);
+    const double maxCellDisplay = lengthDisplayFromMm(5.0);
+    bool ok = false;
+    const double chosenDisplay = QInputDialog::getDouble(this,
+                                                        tr("Stock simulation"),
+                                                        tr("Cell size (%1)").arg(common::unitSuffix(m_units)),
+                                                        defaultCellDisplay,
+                                                        std::max(0.01, minCellDisplay),
+                                                        std::max(minCellDisplay + 0.01, maxCellDisplay),
+                                                        2,
+                                                        &ok);
+    if (!ok)
+    {
+        return;
+    }
+
+    const double cellSizeMm = std::max(0.05, lengthMmFromDisplay(chosenDisplay));
+    const double marginMm = std::max(cellSizeMm * 2.0, cellSizeMm + 0.5);
+
+    struct CursorGuard
+    {
+        CursorGuard() { QApplication::setOverrideCursor(Qt::WaitCursor); }
+        ~CursorGuard() { QApplication::restoreOverrideCursor(); }
+    } guard;
+
+    sim::StockGrid grid(*m_currentModel, cellSizeMm, marginMm);
+    grid.subtractToolpath(*m_currentToolpath, m_lastUserParams);
+    sim::StockGridSummary summary = grid.summarize();
+
+    if (summary.samples.empty())
+    {
+        m_lastSimulationSummary.reset();
+        m_hasSimulationSummary = false;
+        updateSimulationActionState();
+        QMessageBox::information(this, tr("Stock simulation"), tr("Simulation completed but produced no samples."));
+        return;
+    }
+
+    applySimulationSummary(summary, cellSizeMm);
+}
+
+void MainWindow::toggleHeatmap(bool checked)
+{
+    if (!m_viewer)
+    {
+        return;
+    }
+
+    if (!m_hasSimulationSummary || !m_lastSimulationSummary || m_lastSimulationSummary->samples.empty())
+    {
+        if (m_showHeatmapAction)
+        {
+            QSignalBlocker blocker(*m_showHeatmapAction);
+            m_showHeatmapAction->setChecked(false);
+            m_showHeatmapAction->setEnabled(false);
+        }
+        m_viewer->setHeatmapVisible(false);
+        m_viewer->clearHeatmap();
+        return;
+    }
+
+    m_viewer->setHeatmapVisible(checked);
+}
+
+void MainWindow::updateSimulationActionState()
+{
+    const bool hasModel = m_currentModel && m_currentModel->isValid();
+    const bool hasToolpath = m_currentToolpath && !m_currentToolpath->empty();
+    const bool canSimulate = hasModel && hasToolpath;
+
+    if (m_runSimulationAction)
+    {
+        m_runSimulationAction->setEnabled(canSimulate);
+    }
+
+    const bool hasSummary = m_hasSimulationSummary && m_lastSimulationSummary && !m_lastSimulationSummary->samples.empty();
+    if (m_showHeatmapAction)
+    {
+        m_showHeatmapAction->setEnabled(hasSummary);
+        if (!hasSummary)
+        {
+            QSignalBlocker blocker(*m_showHeatmapAction);
+            m_showHeatmapAction->setChecked(false);
+        }
+    }
+
+    if (m_viewer)
+    {
+        if (!hasSummary)
+        {
+            m_viewer->setHeatmapVisible(false);
+            m_viewer->clearHeatmap();
+        }
+        else if (m_showHeatmapAction && m_showHeatmapAction->isChecked())
+        {
+            m_viewer->setHeatmapVisible(true);
+        }
+    }
+}
+
+void MainWindow::applySimulationSummary(const sim::StockGridSummary& summary, double cellSizeMm)
+{
+    m_lastSimulationSummary = std::make_unique<sim::StockGridSummary>(summary);
+    m_hasSimulationSummary = true;
+    m_lastSimulationCellSize = cellSizeMm;
+
+    std::vector<render::HeatmapPoint> points;
+    points.reserve(summary.samples.size());
+    for (const auto& sample : summary.samples)
+    {
+        if (!std::isfinite(sample.position.x) || !std::isfinite(sample.position.y) || !std::isfinite(sample.position.z) || !std::isfinite(sample.error))
+        {
+            continue;
+        }
+
+        render::HeatmapPoint point;
+        point.position = QVector3D(static_cast<float>(sample.position.x),
+                                    static_cast<float>(sample.position.y),
+                                    static_cast<float>(sample.position.z));
+        point.color = heatmapColorForError(sample.error, cellSizeMm);
+        points.push_back(point);
+    }
+
+    if (m_viewer)
+    {
+        m_viewer->setHeatmapPoints(std::move(points));
+    }
+
+    if (m_showHeatmapAction)
+    {
+        QSignalBlocker blocker(*m_showHeatmapAction);
+        m_showHeatmapAction->setEnabled(true);
+        m_showHeatmapAction->setChecked(true);
+    }
+
+    if (m_viewer)
+    {
+        m_viewer->setHeatmapVisible(true);
+    }
+
+    updateSimulationActionState();
+
+    const double maxResidual = std::max(0.0, summary.maxError);
+    const double maxGouge = std::max(0.0, -summary.minError);
+
+    QStringList lines;
+    lines << tr("Voxels removed: %1 %").arg(QString::number(summary.percentRemoved, 'f', 1));
+    lines << tr("Average residual: %1").arg(formatLengthLabel(summary.averageError, 3));
+    lines << tr("Max residual: %1").arg(formatLengthLabel(maxResidual, 3));
+    lines << tr("Max gouge: %1").arg(maxGouge > 0.0 ? formatLengthLabel(maxGouge, 3) : tr("none"));
+
+    const double tier1 = cellSizeMm * 0.25;
+    const double tier2 = cellSizeMm * 0.75;
+    const double tier3 = cellSizeMm * 1.5;
+
+    lines << QString();
+    lines << tr("Legend (|error|):");
+    lines << tr("  ≤ %1 : green").arg(formatLengthLabel(tier1, 2));
+    lines << tr("  ≤ %1 : yellow").arg(formatLengthLabel(tier2, 2));
+    lines << tr("  ≤ %1 : orange").arg(formatLengthLabel(tier3, 2));
+    lines << tr("  > %1 : red").arg(formatLengthLabel(tier3, 2));
+    lines << tr("  Gouge (<0): blue");
+
+    QMessageBox::information(this, tr("Stock simulation"), lines.join('\n'));
+}
+
+QVector3D MainWindow::heatmapColorForError(double errorMm, double cellSizeMm) const
+{
+    if (!std::isfinite(errorMm))
+    {
+        return {0.5f, 0.5f, 0.5f};
+    }
+
+    if (errorMm < -1e-6)
+    {
+        return {0.35f, 0.55f, 0.95f};
+    }
+
+    const double absErr = std::abs(errorMm);
+    const double tier1 = cellSizeMm * 0.25;
+    const double tier2 = cellSizeMm * 0.75;
+    const double tier3 = cellSizeMm * 1.5;
+
+    if (absErr <= tier1)
+    {
+        return {0.2f, 0.85f, 0.2f};
+    }
+    if (absErr <= tier2)
+    {
+        return {0.95f, 0.85f, 0.2f};
+    }
+    if (absErr <= tier3)
+    {
+        return {0.95f, 0.55f, 0.1f};
+    }
+    return {0.85f, 0.2f, 0.2f};
+}
+
+QString MainWindow::formatLengthLabel(double valueMm, int precision) const
+{
+    const double display = lengthDisplayFromMm(valueMm);
+    return QStringLiteral("%1 %2")
+        .arg(QLocale().toString(display, 'f', precision))
+        .arg(common::unitSuffix(m_units));
 }
 
 void MainWindow::onToolSelected(const QString& toolId)
@@ -3388,7 +3700,8 @@ void MainWindow::onFrameStatsUpdated(float fps)
 
 void MainWindow::maybeRunFirstRunTour()
 {
-    QSettings settings;
+    QSettings& settings = userSettings();
+    settings.sync();
     const bool completed = settings.value(QStringLiteral("ui/firstRunCompleted"), false).toBool();
     if (completed)
     {
@@ -3396,6 +3709,7 @@ void MainWindow::maybeRunFirstRunTour()
     }
 
     settings.setValue(QStringLiteral("ui/firstRunCompleted"), true);
+    settings.sync();
 
     const QString samplePath = QDir(QCoreApplication::applicationDirPath())
                                    .filePath(QStringLiteral("samples/sample_part.stl"));
