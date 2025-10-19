@@ -206,10 +206,28 @@ if (BUILD_TESTING)
             common
     )
 
+    add_executable(tp_gouge_step_tests
+        tests/tp_gouge_step.cpp
+    )
+    target_link_libraries(tp_gouge_step_tests
+        PRIVATE
+            tp
+    )
+
+    add_executable(tp_gouge_slope_tests
+        tests/tp_gouge_slope.cpp
+    )
+    target_link_libraries(tp_gouge_slope_tests
+        PRIVATE
+            tp
+    )
+
     add_test(NAME basic_sanity COMMAND basic_sanity_tests)
     add_test(NAME path_safety COMMAND path_safety_tests)
     add_test(NAME headless_pipeline COMMAND headless_pipeline_tests)
     add_test(NAME feature_ai COMMAND feature_ai_tests)
+    add_test(NAME tp_gouge_step COMMAND tp_gouge_step_tests)
+    add_test(NAME tp_gouge_slope COMMAND tp_gouge_slope_tests)
 
     set_tests_properties(path_safety PROPERTIES LABELS fast)
     set_tests_properties(headless_pipeline PROPERTIES LABELS fast)

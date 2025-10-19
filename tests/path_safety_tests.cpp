@@ -132,6 +132,7 @@ int main()
     tp::UserParams params;
     params.enableRoughPass = false;
     params.stockAllowance_mm = 0.0;
+    params.leaveStock_mm = 0.0;
     params.cutterType = tp::UserParams::CutterType::BallNose;
     params.stepOver = 2.5;
     params.maxDepthPerPass = 1.2;

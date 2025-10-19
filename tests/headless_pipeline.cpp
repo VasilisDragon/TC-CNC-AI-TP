@@ -126,6 +126,7 @@ int main()
     tp::UserParams params;
     params.enableRoughPass = false;
     params.stockAllowance_mm = 0.0;
+    params.leaveStock_mm = 0.0;
     params.maxDepthPerPass = 1.0;
     params.stepOver = 2.0;
     params.machine = tp::makeDefaultMachine();

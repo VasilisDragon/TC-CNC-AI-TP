@@ -41,7 +41,7 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
 - `models/` - Example TorchScript/ONNX artefacts and metadata (e.g., `strategy_v2.card.json`).
 - `samples/` - STL sample geometry for quick imports.
 - `tests/` - Doctest-powered C++ unit and smoke tests (`basic_sanity.cpp`, `onnx_ai_smoke.cpp`, etc.).
-- `docs/` - Architecture notes, build instructions, QA checklists, and deployment playbooks.
+- `docs/` - Architecture notes, build instructions, QA checklists, and deployment playbooks. See `docs/map.md` for a verified module map tying targets to their responsibilities.
 - `scripts/verify_env.ps1` - PowerShell helper to validate a Windows build environment.
 - Root configuration:
   - `CMakeLists.txt`, `CMakePresets.json`, `BUILD.md`, `vcpkg.json`, and `LICENSE.txt` control the build and dependency graph.

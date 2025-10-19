@@ -1,0 +1,48 @@
+void ToolpathGenerator::applyLeaveStockAdjustment(Toolpath& toolpath, const render::Model& model, const UserParams& params) const
+{
+    if (params.leaveStock_mm <= 1e-6)
+    {
+        return;
+    }
+
+    GougeChecker checker(model);
+    GougeParams gougeParams;
+    gougeParams.toolRadius = std::max(0.0, params.toolDiameter * 0.5);
+    gougeParams.holderRadius = std::max(gougeParams.toolRadius, params.toolDiameter * 0.5);
+    gougeParams.leaveStock = params.leaveStock_mm;
+    gougeParams.safetyZ = params.machine.safeZ_mm;
+
+    for (Polyline& poly : toolpath.passes)
+    {
+        if (poly.motion != MotionType::Cut || poly.pts.size() < 2)
+        {
+            continue;
+        }
+
+        std::vector<GougeChecker::Vec3> path;
+        path.reserve(poly.pts.size());
+        for (const Vertex& vertex : poly.pts)
+        {
+            path.push_back(vertex.p);
+        }
+
+        auto adjust = checker.adjustZForLeaveStock(path, gougeParams);
+        if (!adjust.ok)
+        {
+            common::logWarning(QStringLiteral("Leave-stock adjustment skipped: %1")
+                                   .arg(QString::fromStdString(adjust.message)));
+            continue;
+        }
+
+        const auto& adjustedPath = adjust.adjustedPath;
+        if (adjustedPath.size() != poly.pts.size())
+        {
+            continue;
+        }
+
+        for (std::size_t i = 0; i < poly.pts.size(); ++i)
+        {
+            poly.pts[i].p = adjustedPath[i];
+        }
+    }
+}
