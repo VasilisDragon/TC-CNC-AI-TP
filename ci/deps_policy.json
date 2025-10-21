@@ -1,0 +1,26 @@
+{
+  "python": {
+    "pip_audit_min_severity": "CRITICAL",
+    "max_age_warning_days": 180,
+    "max_age_fail_days": 540,
+    "requirements": [
+      {
+        "name": "Training toolkit",
+        "path": "train/requirements.in"
+      }
+    ]
+  },
+  "vcpkg": {
+    "manifest": "vcpkg.json",
+    "max_baseline_age_days": 120
+  },
+  "summary": {
+    "success_message": "All pinned dependencies are within policy and no critical vulnerabilities were detected.",
+    "actions": {
+      "python_vuln": "Update the pinned requirement to a version without critical CVEs and regenerate train/requirements.lock using pip-compile.",
+      "python_stale": "Upgrade the pinned requirement and refresh train/requirements.lock (pip-compile --generate-hashes).",
+      "python_warn": "Plan upgrades for warning-level pins and refresh train/requirements.lock during the next maintenance window.",
+      "vcpkg_stale": "Run `vcpkg x-update-baseline` (or bump the builtin-baseline commit) and rebuild."
+    }
+  }
+}

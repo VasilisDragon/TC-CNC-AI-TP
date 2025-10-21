@@ -57,11 +57,10 @@ At construction time TorchAI loads the module on CPU and attempts to move it to 
 The active device label is exposed through `TorchAI::device()` and mirrored in **AI > Preferences...**. Toggling the force-CPU checkbox immediately migrates the module for preview; accepting the dialog persists the setting via `QSettings`.
 
 ## Failure Handling
-Any load or inference error is caught, logged, and stored in `TorchAI::lastError()`. On failure the adapter returns a conservative decision:
+Any load or inference error is caught, logged, and stored in `TorchAI::lastError()`. On failure the adapter returns a conservative two-step plan:
 
-- Strategy: Raster
-- Raster angle: 45 degrees
-- Step-over: user supplied value
+1. Raster roughing at 45 degrees using the user supplied step-over.
+2. Raster finishing with the same angle, a reduced step-over, and half the configured step-down.
 - Pass flags: rough and finish enabled
 
 Latency for successful runs is tracked in `TorchAI::lastLatencyMs()` to support quick smoke tests.
