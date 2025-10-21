@@ -78,7 +78,7 @@ void runScenario(tp::ToolpathGenerator& generator,
     assert(hasCut);
 
     tp::GRBLPost post;
-    const std::string gcode = post.generate(toolpath, common::Unit::Millimeters, params);
+    const std::string gcode = post.generate(toolpath, common::UnitSystem::Millimeters, params);
     assert(!gcode.empty());
 
     const std::vector<std::string> lines = splitLines(gcode);

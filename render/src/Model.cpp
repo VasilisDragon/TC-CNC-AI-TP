@@ -1,3 +1,5 @@
+// Model.cpp holds the lightweight geometry container shared across the render and toolpath modules, so
+// we keep serialization and bounding-box math close to the data to minimize coupling to Qt helpers.
 #include "render/Model.h"
 
 #include <QtCore/QTextStream>

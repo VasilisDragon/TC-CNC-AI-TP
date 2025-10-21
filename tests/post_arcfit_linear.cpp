@@ -58,7 +58,7 @@ int main()
     params.post.maxArcChordError_mm = 0.05;
 
     tp::GRBLPost post;
-    const std::string gcode = post.generate(toolpath, common::Unit::Millimeters, params);
+    const std::string gcode = post.generate(toolpath, common::UnitSystem::Millimeters, params);
 
     const int arcMoves = countArcCommands(gcode);
     assert(arcMoves == 0);

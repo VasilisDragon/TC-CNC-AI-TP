@@ -78,8 +78,8 @@ int main()
     params.post.maxArcChordError_mm = 0.05;
 
     tp::GRBLPost post;
-    const std::string mmGcode = post.generate(toolpath, common::Unit::Millimeters, params);
-    const std::string inchGcode = post.generate(toolpath, common::Unit::Inches, params);
+    const std::string mmGcode = post.generate(toolpath, common::UnitSystem::Millimeters, params);
+    const std::string inchGcode = post.generate(toolpath, common::UnitSystem::Inches, params);
 
     const std::vector<std::string> mmCodes = extractMotionCodes(mmGcode);
     const std::vector<std::string> inchCodes = extractMotionCodes(inchGcode);

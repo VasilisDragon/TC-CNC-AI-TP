@@ -350,7 +350,7 @@ TEST_CASE("GRBLPost tags strategy step comments")
     params.strategyOverride = {ai::StrategyStep{}, ai::StrategyStep{}};
 
     tp::GRBLPost post;
-    const std::string gcode = post.generate(toolpath, common::Unit::Millimeters, params);
+    const std::string gcode = post.generate(toolpath, common::UnitSystem::Millimeters, params);
     CHECK(gcode.find("(STEP 1") != std::string::npos);
     CHECK(gcode.find("(STEP 2") != std::string::npos);
 }

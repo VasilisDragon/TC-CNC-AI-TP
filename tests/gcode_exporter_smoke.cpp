@@ -38,7 +38,7 @@ int main()
     params.stock = toolpath.stock;
 
     tp::GRBLPost post;
-    const std::string gcode = post.emit(toolpath, common::Unit::Millimeters, params);
+    const std::string gcode = post.emit(toolpath, common::UnitSystem::Millimeters, params);
 
     const char* expected =
         "(AIToolpathGenerator - GRBL Post)\r\n"
