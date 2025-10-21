@@ -69,9 +69,12 @@ class FixedWaterlineAI : public ai::IPathAI
 public:
     FixedWaterlineAI()
     {
-        m_decision.strat = ai::StrategyDecision::Strategy::Waterline;
-        m_decision.roughPass = false;
-        m_decision.finishPass = true;
+        ai::StrategyStep step;
+        step.type = ai::StrategyStep::Type::Waterline;
+        step.stepover = 0.0;
+        step.stepdown = 0.0;
+        step.finish_pass = true;
+        m_decision.steps.push_back(step);
     }
 
     ai::StrategyDecision predict(const render::Model&, const tp::UserParams&) override

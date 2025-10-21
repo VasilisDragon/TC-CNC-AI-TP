@@ -1,4 +1,5 @@
 # CNCTC
+[![Dependency Health](https://github.com/CNCTC/CNCTC/actions/workflows/ci/deps.yml/badge.svg)](https://github.com/CNCTC/CNCTC/actions/workflows/ci/deps.yml)
 
 CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop client with a modular toolpath and AI stack. The application ingests triangle meshes, extracts geometric descriptors, and blends heuristics with TorchScript/ONNX models to recommend machining strategies in real time.
 

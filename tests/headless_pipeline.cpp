@@ -90,7 +90,9 @@ void runScenario(tp::ToolpathGenerator& generator,
 
     const std::filesystem::path tempDir = std::filesystem::temp_directory_path();
     const std::string suffix =
-        (decision.strat == ai::StrategyDecision::Strategy::Waterline) ? "waterline" : "raster";
+        (!decision.steps.empty() && decision.steps.front().type == ai::StrategyStep::Type::Waterline)
+            ? "waterline"
+            : "raster";
     const std::filesystem::path tempFile = tempDir / ("cnctc_headless_" + suffix + ".gcode");
 
     {
@@ -140,16 +142,21 @@ int main()
     std::atomic<bool> cancel{false};
 
     ai::StrategyDecision raster;
-    raster.strat = ai::StrategyDecision::Strategy::Raster;
-    raster.stepOverMM = params.stepOver;
-    raster.roughPass = false;
-    raster.finishPass = true;
+    ai::StrategyStep rasterStep;
+    rasterStep.type = ai::StrategyStep::Type::Raster;
+    rasterStep.stepover = params.stepOver;
+    rasterStep.stepdown = params.maxDepthPerPass;
+    rasterStep.finish_pass = true;
+    raster.steps.push_back(rasterStep);
     runScenario(generator, params, ai, model, cancel, raster);
 
     ai::StrategyDecision waterline;
-    waterline.strat = ai::StrategyDecision::Strategy::Waterline;
-    waterline.roughPass = false;
-    waterline.finishPass = true;
+    ai::StrategyStep waterlineStep;
+    waterlineStep.type = ai::StrategyStep::Type::Waterline;
+    waterlineStep.stepover = params.stepOver;
+    waterlineStep.stepdown = params.maxDepthPerPass;
+    waterlineStep.finish_pass = true;
+    waterline.steps.push_back(waterlineStep);
     runScenario(generator, params, ai, model, cancel, waterline);
 
     return 0;

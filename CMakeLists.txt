@@ -307,9 +307,15 @@ if (MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
-add_compile_definitions(
-    $<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN;NOMINMAX;_USE_MATH_DEFINES;UNICODE;_UNICODE>
-)
+if (WIN32)
+    add_compile_definitions(
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        _USE_MATH_DEFINES
+        UNICODE
+        _UNICODE
+    )
+endif()
 
 set(EXTRA_RUNTIME_DLLS "")
 if (TARGET assimp::assimp)

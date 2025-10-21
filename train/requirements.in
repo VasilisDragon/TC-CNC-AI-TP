@@ -1,0 +1,14 @@
+# Top-level dependencies for CNCTC training/evaluation tooling.
+# Regenerate train/requirements.lock via:
+#   pip-compile --generate-hashes --resolver=backtracking train/requirements.in
+
+build123d==0.9.1
+cadquery==2.6.0
+matplotlib==3.10.7
+numpy==2.3.4
+onnx==1.19.1
+onnxruntime==1.23.1
+torch==2.9.0
+torchaudio==2.9.0
+torchvision==0.24.0
+trimesh==4.8.3

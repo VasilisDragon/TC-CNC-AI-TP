@@ -10,19 +10,29 @@ bootstrapping AI-driven CAM research.
 ## Requirements
 
 Create a clean Python environment (3.10 or newer is recommended) and install the
-dependencies pinned for repeatability:
+hash-locked dependencies for repeatability:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate               # or .venv\Scripts\activate on Windows
-pip install -r train/requirements.txt
+pip install --require-hashes -r train/requirements.lock
 ```
 
-Key packages:
+Key packages (see `train/requirements.lock` for the full set):
 
-* **CadQuery** `2.3.1` - parametric solid modelling used to author randomized stock.
-* **NumPy** `1.26.4` - random sampling, numeric helpers.
-* **trimesh** `4.2.3` - STL I/O and bounding-box calculations.
+* **CadQuery** `2.3.1` + **build123d** `0.8.0` – parametric solid modelling back-ends.
+* **NumPy** `2.1.3` + **Matplotlib** `3.9.3` – numeric helpers and quick charting.
+* **Torch** `2.2.2` + **TorchVision** `0.17.2` + **TorchAudio** `2.2.2` – model training and augmentation.
+* **ONNX Runtime** `1.17.1` – export verification.
+* **trimesh** `4.2.3` – STL I/O and bounding-box calculations.
+
+### Updating the lock file
+
+1. Adjust `train/requirements.in` with any top-level dependency changes (pin exact versions).
+2. Regenerate the lock file from a clean environment with  
+   `pip-compile --generate-hashes --resolver=backtracking train/requirements.in`.
+3. If CUDA wheels change, update the hash lists in `src/train/EnvManager.cpp` so the in-app
+   installer keeps enforcing `--require-hashes`.
 
 ## Generator usage
 
@@ -88,11 +98,8 @@ synthesised geometry is purely algorithmic and contains no third-party models.
 
 ## Strategy predictor training
 
-Install the additional dependencies required for the learning pipeline:
-
-```bash
-pip install torch onnx onnxscript numpy
-```
+The environment prepared above already ships with the Torch / ONNX stack required
+for model training.
 
 Train the machining strategy model and emit the artefacts described in the project brief:
 

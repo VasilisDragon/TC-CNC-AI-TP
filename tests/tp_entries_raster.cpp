@@ -189,10 +189,12 @@ int main()
     baseParams.stock.topZ_mm = 12.0;
 
     ai::StrategyDecision decision;
-    decision.strat = ai::StrategyDecision::Strategy::Raster;
-    decision.roughPass = false;
-    decision.finishPass = true;
-    decision.stepOverMM = baseParams.stepOver;
+    ai::StrategyStep step;
+    step.type = ai::StrategyStep::Type::Raster;
+    step.stepover = baseParams.stepOver;
+    step.stepdown = baseParams.maxDepthPerPass;
+    step.finish_pass = true;
+    decision.steps.push_back(step);
 
     FixedRasterAI ai(decision);
     tp::ToolpathGenerator generator;

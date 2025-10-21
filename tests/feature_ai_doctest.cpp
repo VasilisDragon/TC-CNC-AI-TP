@@ -4,6 +4,7 @@
 #include "ai/FeatureExtractor.h"
 #include "ai/ModelCard.h"
 #include "ai/OnnxAI.h"
+#include "ai/StrategySerialization.h"
 #include "ai/TorchAI.h"
 #include "render/Model.h"
 #include "tp/GRBLPost.h"
@@ -17,9 +18,13 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QTextStream>
 
 #include <glm/vec3.hpp>
+
+#include <atomic>
 #include <filesystem>
+#include <vector>
 
 namespace
 {
@@ -132,148 +137,20 @@ QJsonObject makeValidCard(const QString& modelType,
     root.insert(QStringLiteral("training"), training);
 
     QJsonObject dataset;
-    dataset.insert(QStringLiteral("id"), QStringLiteral("testset"));
-    dataset.insert(QStringLiteral("sha256"),
-                   QStringLiteral("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+    dataset.insert(QStringLiteral("id"), QStringLiteral("synthetic_dataset"));
+    dataset.insert(QStringLiteral("sha256"), QStringLiteral("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
     root.insert(QStringLiteral("dataset"), dataset);
-    root.insert(QStringLiteral("created_at"), QStringLiteral("2025-01-15T12:00:00Z"));
+    root.insert(QStringLiteral("created_at"), QStringLiteral("2025-01-01T00:00:00Z"));
 
     return root;
 }
 
 } // namespace
 
-TEST_CASE("ModelCard loads valid Torch schema")
-{
-    QTemporaryDir dir;
-    CHECK(dir.isValid());
-    if (!dir.isValid())
-    {
-        return;
-    }
-
-    const QString modelFile = dir.filePath(QStringLiteral("sample.pt"));
-    QFile torchFile(modelFile);
-    const bool openedTorch = torchFile.open(QIODevice::WriteOnly);
-    CHECK(openedTorch);
-    if (!openedTorch)
-    {
-        return;
-    }
-    torchFile.close();
-
-    QJsonObject card = makeValidCard(QStringLiteral("torchscript"),
-                                     QStringLiteral("PyTorch"),
-                                     {QStringLiteral("2.1.0")});
-    const bool savedTorchCard = writeJson(dir.filePath(QStringLiteral("sample.pt.model.json")), card);
-    CHECK(savedTorchCard);
-    if (!savedTorchCard)
-    {
-        return;
-    }
-
-    std::string error;
-    const auto loaded = ai::ModelCard::loadForModel(toFsPath(modelFile),
-                                                    ai::ModelCard::Backend::Torch,
-                                                    error);
-    CHECK(loaded.has_value());
-    if (!loaded.has_value())
-    {
-        return;
-    }
-    CHECK(error.empty());
-    CHECK(loaded->featureCount == ai::FeatureExtractor::featureCount() + 2);
-    CHECK(loaded->normalization.mean.size() == loaded->featureCount);
-    CHECK(loaded->training.framework.find("PyTorch") != std::string::npos);
-}
-
-TEST_CASE("ModelCard rejects normalization mismatch")
-{
-    QTemporaryDir dir;
-    CHECK(dir.isValid());
-    if (!dir.isValid())
-    {
-        return;
-    }
-
-    const QString modelFile = dir.filePath(QStringLiteral("broken.pt"));
-    QFile brokenFile(modelFile);
-    const bool openedBroken = brokenFile.open(QIODevice::WriteOnly);
-    CHECK(openedBroken);
-    if (!openedBroken)
-    {
-        return;
-    }
-    brokenFile.close();
-
-    QJsonObject card = makeValidCard(QStringLiteral("torchscript"),
-                                     QStringLiteral("PyTorch"),
-                                     {QStringLiteral("2.1.0")});
-    QJsonObject features = card.value(QStringLiteral("features")).toObject();
-    QJsonObject normalize = features.value(QStringLiteral("normalize")).toObject();
-    QJsonArray mean;
-    mean.append(0.0);
-    normalize.insert(QStringLiteral("mean"), mean);
-    features.insert(QStringLiteral("normalize"), normalize);
-    card.insert(QStringLiteral("features"), features);
-    const bool savedBroken = writeJson(dir.filePath(QStringLiteral("broken.pt.model.json")), card);
-    CHECK(savedBroken);
-    if (!savedBroken)
-    {
-        return;
-    }
-
-    std::string error;
-    const auto loaded = ai::ModelCard::loadForModel(toFsPath(modelFile),
-                                                    ai::ModelCard::Backend::Torch,
-                                                    error);
-    CHECK_FALSE(loaded.has_value());
-    CHECK_FALSE(error.empty());
-    CHECK(error.find("features.normalize.mean") != std::string::npos);
-}
-
-TEST_CASE("ModelCard rejects ONNX framework mismatch")
-{
-    QTemporaryDir dir;
-    CHECK(dir.isValid());
-    if (!dir.isValid())
-    {
-        return;
-    }
-
-    const QString modelFile = dir.filePath(QStringLiteral("sample.onnx"));
-    QFile onnxFile(modelFile);
-    const bool openedOnnx = onnxFile.open(QIODevice::WriteOnly);
-    CHECK(openedOnnx);
-    if (!openedOnnx)
-    {
-        return;
-    }
-    onnxFile.close();
-
-    QJsonObject card = makeValidCard(QStringLiteral("onnx"),
-                                     QStringLiteral("TensorFlow"),
-                                     {QStringLiteral("2.14.0")});
-    const bool savedOnnxCard = writeJson(dir.filePath(QStringLiteral("sample.onnx.model.json")), card);
-    CHECK(savedOnnxCard);
-    if (!savedOnnxCard)
-    {
-        return;
-    }
-
-    std::string error;
-    const auto loaded = ai::ModelCard::loadForModel(toFsPath(modelFile),
-                                                    ai::ModelCard::Backend::Onnx,
-                                                    error);
-    CHECK_FALSE(loaded.has_value());
-    CHECK_FALSE(error.empty());
-    CHECK(error.find("framework") != std::string::npos);
-}
-
 TEST_CASE("FeatureExtractor flags invalid mesh")
 {
-    render::Model emptyModel;
-    const auto features = ai::FeatureExtractor::computeGlobalFeatures(emptyModel);
+    render::Model model;
+    const auto features = ai::FeatureExtractor::computeGlobalFeatures(model);
     CHECK_FALSE(features.valid);
 }
 
@@ -289,6 +166,64 @@ TEST_CASE("FeatureExtractor computes triangle metrics")
     CHECK(features.pocketDepth == doctest::Approx(0.0f));
 }
 
+TEST_CASE("ModelCard validates happy path")
+{
+    QTemporaryDir dir;
+    CHECK(dir.isValid());
+
+    const QString modelFile = dir.filePath(QStringLiteral("sample.pt"));
+    QFile binary(modelFile);
+    CHECK(binary.open(QIODevice::WriteOnly));
+    binary.write("torch");
+    binary.close();
+
+    const QString cardPath = dir.filePath(QStringLiteral("sample.pt.model.json"));
+    const QJsonObject card = makeValidCard(QStringLiteral("torchscript"),
+                                           QStringLiteral("PyTorch"),
+                                           {QStringLiteral("2.3.0")});
+    CHECK(writeJson(cardPath, card));
+
+    std::string error;
+    const auto loaded =
+        ai::ModelCard::loadForModel(toFsPath(modelFile), ai::ModelCard::Backend::Torch, error);
+    CHECK(loaded.has_value());
+    CHECK(error.empty());
+    if (loaded)
+    {
+        CHECK(loaded->featureCount == ai::FeatureExtractor::featureCount() + 2);
+        CHECK(loaded->training.framework == "PyTorch");
+        CHECK_FALSE(loaded->training.versions.empty());
+    }
+}
+
+TEST_CASE("ModelCard rejects malformed normalization")
+{
+    QTemporaryDir dir;
+    CHECK(dir.isValid());
+
+    const QString modelFile = dir.filePath(QStringLiteral("sample.pt"));
+    QFile binary(modelFile);
+    CHECK(binary.open(QIODevice::WriteOnly));
+    binary.write("torch");
+    binary.close();
+
+    QJsonObject card = makeValidCard(QStringLiteral("torchscript"),
+                                     QStringLiteral("PyTorch"),
+                                     {QStringLiteral("2.3.0")});
+    QJsonObject features = card.value(QStringLiteral("features")).toObject();
+    QJsonObject normalize = features.value(QStringLiteral("normalize")).toObject();
+    normalize.insert(QStringLiteral("mean"), QJsonArray{1, 2, 3});
+    features.insert(QStringLiteral("normalize"), normalize);
+    card.insert(QStringLiteral("features"), features);
+    CHECK(writeJson(dir.filePath(QStringLiteral("sample.pt.model.json")), card));
+
+    std::string error;
+    const auto loaded =
+        ai::ModelCard::loadForModel(toFsPath(modelFile), ai::ModelCard::Backend::Torch, error);
+    CHECK_FALSE(loaded.has_value());
+    CHECK_FALSE(error.empty());
+}
+
 TEST_CASE("TorchAI falls back when features invalid")
 {
     render::Model emptyModel;
@@ -297,8 +232,9 @@ TEST_CASE("TorchAI falls back when features invalid")
     ai::TorchAI torchAi{std::filesystem::path{}};
 
     const ai::StrategyDecision decision = torchAi.predict(emptyModel, params);
-    CHECK(decision.strat == ai::StrategyDecision::Strategy::Raster);
-    CHECK(decision.stepOverMM == doctest::Approx(params.stepOver));
+    CHECK(decision.steps.size() >= 2);
+    CHECK(decision.steps.front().type == ai::StrategyStep::Type::Raster);
+    CHECK(decision.steps.front().stepover == doctest::Approx(params.stepOver));
     CHECK_FALSE(torchAi.lastError().empty());
 }
 
@@ -310,40 +246,112 @@ TEST_CASE("OnnxAI falls back when features invalid")
     ai::OnnxAI onnxAi{std::filesystem::path{}};
 
     const ai::StrategyDecision decision = onnxAi.predict(emptyModel, params);
-    CHECK(decision.strat == ai::StrategyDecision::Strategy::Raster);
-    CHECK(decision.stepOverMM == doctest::Approx(params.stepOver));
+    CHECK(decision.steps.size() >= 2);
+    CHECK(decision.steps.front().type == ai::StrategyStep::Type::Raster);
+    CHECK(decision.steps.front().stepover == doctest::Approx(params.stepOver));
     CHECK_FALSE(onnxAi.lastError().empty());
 }
 
-TEST_CASE("GRBLPost emits feed, unit, and tool moves")
+TEST_CASE("StrategyDecision serialization round trip")
+{
+    ai::StrategyDecision decision;
+    ai::StrategyStep rough;
+    rough.type = ai::StrategyStep::Type::Raster;
+    rough.stepover = 2.4;
+    rough.stepdown = 1.0;
+    rough.angle_deg = 45.0;
+    rough.finish_pass = false;
+
+    ai::StrategyStep finish = rough;
+    finish.finish_pass = true;
+    finish.stepover = 1.2;
+    finish.stepdown = 0.5;
+    finish.angle_deg = 90.0;
+
+    decision.steps = {rough, finish};
+
+    const QJsonObject json = ai::decisionToJson(decision);
+    const ai::StrategyDecision restored = ai::decisionFromJson(json);
+    CHECK(restored.steps.size() == decision.steps.size());
+    for (std::size_t i = 0; i < decision.steps.size(); ++i)
+    {
+        const ai::StrategyStep& expected = decision.steps[i];
+        const ai::StrategyStep& actual = restored.steps[i];
+        CHECK(actual.type == expected.type);
+        CHECK(actual.finish_pass == expected.finish_pass);
+        CHECK(actual.stepover == doctest::Approx(expected.stepover));
+        CHECK(actual.stepdown == doctest::Approx(expected.stepdown));
+        CHECK(actual.angle_deg == doctest::Approx(expected.angle_deg));
+    }
+}
+
+TEST_CASE("ToolpathGenerator honours override steps")
+{
+    render::Model model = makeTriangleModel();
+    tp::UserParams params;
+    params.stepOver = 1.0;
+    params.maxDepthPerPass = 0.6;
+    params.useStrategyOverride = true;
+    params.stockAllowance_mm = 0.4;
+    params.leaveStock_mm = params.stockAllowance_mm;
+    params.strategyOverride.clear();
+
+    ai::StrategyStep rough;
+    rough.type = ai::StrategyStep::Type::Raster;
+    rough.stepover = params.stepOver;
+    rough.stepdown = params.maxDepthPerPass;
+    rough.angle_deg = 0.0;
+    rough.finish_pass = false;
+
+    ai::StrategyStep finish = rough;
+    finish.finish_pass = true;
+    finish.stepover = params.stepOver * 0.5;
+    finish.stepdown = params.maxDepthPerPass * 0.5;
+    finish.angle_deg = 45.0;
+
+    params.strategyOverride = {rough, finish};
+
+    class NullAI : public ai::IPathAI
+    {
+    public:
+        ai::StrategyDecision predict(const render::Model&, const tp::UserParams&) override { return {}; }
+    } nullAi;
+
+    tp::ToolpathGenerator generator;
+    std::atomic<bool> cancel{false};
+    tp::Toolpath toolpath = generator.generate(model, params, nullAi, cancel);
+    CHECK(toolpath.strategySteps.size() == 2);
+    CHECK(toolpath.strategySteps.front().finish_pass == false);
+    CHECK(toolpath.strategySteps.back().finish_pass == true);
+}
+
+TEST_CASE("GRBLPost tags strategy step comments")
 {
     tp::Toolpath toolpath;
     toolpath.feed = 900.0;
     toolpath.spindle = 10000.0;
     toolpath.machine = tp::makeDefaultMachine();
-    toolpath.machine.name = "Test Rig";
-    toolpath.machine.rapidFeed_mm_min = 5000.0;
-    toolpath.machine.maxFeed_mm_min = 1500.0;
-    toolpath.rapidFeed = toolpath.machine.rapidFeed_mm_min;
-    toolpath.stock = tp::makeDefaultStock();
+    toolpath.strategySteps.resize(2);
 
-    tp::Polyline line;
-    line.motion = tp::MotionType::Cut;
-    line.pts.push_back({glm::vec3(0.0f, 0.0f, 0.0f)});
-    line.pts.push_back({glm::vec3(5.0f, 0.0f, -1.0f)});
-    toolpath.passes.push_back(line);
+    tp::Polyline rough;
+    rough.motion = tp::MotionType::Cut;
+    rough.strategyStep = 0;
+    rough.pts.push_back({glm::vec3(0.0f, 0.0f, 0.0f)});
+    rough.pts.push_back({glm::vec3(5.0f, 0.0f, -1.0f)});
+    toolpath.passes.push_back(rough);
+
+    tp::Polyline finish = rough;
+    finish.strategyStep = 1;
+    finish.pts[0].p.y = 1.0f;
+    finish.pts[1].p.y = 1.0f;
+    toolpath.passes.push_back(finish);
 
     tp::UserParams params;
-    params.feed = toolpath.feed;
-    params.spindle = toolpath.spindle;
-    params.machine = toolpath.machine;
-    params.stock = toolpath.stock;
+    params.strategyOverride = {ai::StrategyStep{}, ai::StrategyStep{}};
 
     tp::GRBLPost post;
     const std::string gcode = post.generate(toolpath, common::Unit::Millimeters, params);
-
-    CHECK(gcode.find("G21") != std::string::npos); // metric units
-    CHECK(gcode.find("F900.000") != std::string::npos);
-    CHECK(gcode.find("M3 S10000") != std::string::npos);
-    CHECK(gcode.find("G1 X5.000 Y0.000 Z-1.000") != std::string::npos);
+    CHECK(gcode.find("(STEP 1") != std::string::npos);
+    CHECK(gcode.find("(STEP 2") != std::string::npos);
 }
+

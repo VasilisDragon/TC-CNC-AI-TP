@@ -27,7 +27,11 @@ int main()
     ai::OnnxAI ai(std::filesystem::path());
     ai.setForceCpu(true);
     const ai::StrategyDecision decision = ai.predict(model, params);
-    if (std::abs(decision.stepOverMM - params.stepOver) > 1e-6)
+    if (decision.steps.empty())
+    {
+        return 1;
+    }
+    if (std::abs(decision.steps.front().stepover - params.stepOver) > 1e-6)
     {
         return 1;
     }

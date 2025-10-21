@@ -140,10 +140,12 @@ int main()
     params.machine = tp::makeDefaultMachine();
 
     ai::StrategyDecision decision;
-    decision.strat = ai::StrategyDecision::Strategy::Raster;
-    decision.stepOverMM = params.stepOver;
-    decision.roughPass = false;
-    decision.finishPass = true;
+    ai::StrategyStep step;
+    step.type = ai::StrategyStep::Type::Raster;
+    step.stepover = params.stepOver;
+    step.stepdown = params.maxDepthPerPass;
+    step.finish_pass = true;
+    decision.steps.push_back(step);
 
     FixedAI ai(decision);
 

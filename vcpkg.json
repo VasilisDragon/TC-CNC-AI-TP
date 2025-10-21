@@ -1,7 +1,7 @@
 {
   "name": "cnctc",
   "version-string": "0.1.0",
-  "builtin-baseline": "8e16865b45bb8a8238cc2f742dfaa94dc67af64a",
+  "builtin-baseline": "604697b05b6bf8c75518d2c133a149ff7ecb3c8b",
   "dependencies": [
     {
       "name": "qtbase",
@@ -9,6 +9,9 @@
     },
     "qttools",
     "assimp",
-    "glm"
+    "glm",
+    {
+      "name": "onnxruntime-gpu"
+    }
   ]
 }
