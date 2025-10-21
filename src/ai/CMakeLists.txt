@@ -10,6 +10,8 @@ add_library(ai STATIC
     OnnxAI.cpp
     ModelManager.h
     ModelManager.cpp
+    StrategySerialization.h
+    StrategySerialization.cpp
 )
 
 target_include_directories(ai

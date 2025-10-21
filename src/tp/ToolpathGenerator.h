@@ -49,6 +49,8 @@ struct UserParams
     bool useHeightField{true};
     CutterType cutterType{CutterType::FlatEndmill};
     CutDirection cutDirection{CutDirection::Climb};
+    bool useStrategyOverride{false};
+    std::vector<ai::StrategyStep> strategyOverride;
     Stock stock{makeDefaultStock()};
     Machine machine{makeDefaultMachine()};
     struct PostSettings
@@ -80,9 +82,9 @@ private:
         };
 
         Kind kind{Kind::Finish};
-        double stepOver{0.0};
-        double maxStepDown{0.0};
+        ai::StrategyStep step{};
         double allowance{0.0};
+        std::size_t index{0};
     };
 
     static const char* passLabel(const PassProfile& profile);
@@ -92,7 +94,6 @@ private:
 
     Toolpath generateRasterTopography(const render::Model& model,
                                       const UserParams& params,
-                                      const ai::StrategyDecision& decision,
                                       const PassProfile& profile,
                                       const std::atomic<bool>& cancelFlag,
                                       const std::function<void(int)>& progressCallback,
@@ -100,7 +101,6 @@ private:
 
     Toolpath generateWaterlineSlicer(const render::Model& model,
                                      const UserParams& params,
-                                     const ai::StrategyDecision& decision,
                                      const PassProfile& profile,
                                      const std::atomic<bool>& cancelFlag,
                                      const std::function<void(int)>& progressCallback,
@@ -108,7 +108,6 @@ private:
 
     Toolpath generateFallbackRaster(const render::Model& model,
                                     const UserParams& params,
-                                    const ai::StrategyDecision& decision,
                                     const PassProfile& profile,
                                     const std::atomic<bool>& cancelFlag,
                                     const std::function<void(int)>& progressCallback) const;

@@ -3,6 +3,7 @@
 #include <QtCore/QMetaType>
 
 #include <memory>
+#include <vector>
 
 namespace render
 {
@@ -17,24 +18,24 @@ struct UserParams;
 namespace ai
 {
 
-struct StrategyDecision
+struct StrategyStep
 {
-    enum class Strategy
+    enum class Type
     {
         Raster = 0,
         Waterline = 1
     };
 
-    Strategy strat{Strategy::Raster};
-    double rasterAngleDeg{0.0};
-    double stepOverMM{0.0};
-    /**
-     * The generator combines these pass flags with user preferences. When both
-     * are enabled the generated schedule runs the roughing stage first, then
-     * a finishing pass that consumes the roughing allowance.
-     */
-    bool roughPass{true};
-    bool finishPass{true};
+    Type type{Type::Raster};
+    double stepover{0.0};
+    double stepdown{0.0};
+    double angle_deg{0.0};
+    bool finish_pass{false};
+};
+
+struct StrategyDecision
+{
+    std::vector<StrategyStep> steps;
 };
 
 class IPathAI

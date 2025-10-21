@@ -670,11 +670,11 @@ double normalizeAngleDeg(double angle)
 }
 
 double selectRasterAngleDeg(const UserParams& params,
-                            const ai::StrategyDecision& decision,
+                            const ai::StrategyStep& step,
                             bool preferUserAngle)
 {
     const double userAngle = params.rasterAngleDeg;
-    const double aiAngle = decision.rasterAngleDeg;
+    const double aiAngle = (step.type == ai::StrategyStep::Type::Raster) ? step.angle_deg : 0.0;
 
     if (preferUserAngle && std::abs(userAngle) > 1e-6)
     {
@@ -853,17 +853,10 @@ std::vector<ToolpathGenerator::PassProfile> ToolpathGenerator::buildPassPlan(con
                                                                              const ai::StrategyDecision& decision)
 {
     const double safeToolDiameter = std::max(params.toolDiameter, 0.1);
-    const double aiStep = (decision.stepOverMM > 0.0) ? decision.stepOverMM : 0.0;
-    double baseStep = aiStep > 0.0 ? aiStep : params.stepOver;
-    if (baseStep <= 0.0)
-    {
-        baseStep = safeToolDiameter * 0.4;
-    }
-
-    double finishStep = std::clamp(baseStep, 0.1, safeToolDiameter * 0.45);
+    const double userStepOver = (params.stepOver > 0.0) ? params.stepOver : safeToolDiameter * 0.4;
+    const double finishStep = std::clamp(userStepOver, 0.1, safeToolDiameter * 0.45);
     double roughStep = std::max({params.stepOver, finishStep, safeToolDiameter * 0.65});
     roughStep = std::clamp(roughStep, finishStep + 0.05, safeToolDiameter);
-
     if (roughStep - finishStep < 0.05)
     {
         roughStep = std::min(safeToolDiameter, finishStep * 1.5);
@@ -871,33 +864,87 @@ std::vector<ToolpathGenerator::PassProfile> ToolpathGenerator::buildPassPlan(con
 
     const double baseStepDown = std::max(params.maxDepthPerPass, 0.1);
     const double finishStepDown = std::max(0.1, baseStepDown * 0.5);
-
-    const double allowance = std::clamp(params.stockAllowance_mm, 0.0, safeToolDiameter);
-    const bool wantRough = decision.roughPass && params.enableRoughPass && allowance > 1e-4;
-    const bool wantFinish = decision.finishPass && params.enableFinishPass;
+    const double allowanceNominal = std::clamp(params.stockAllowance_mm, 0.0, safeToolDiameter);
 
     std::vector<PassProfile> plan;
-    plan.reserve(2);
+    plan.reserve(decision.steps.size());
 
-    if (wantRough)
+    auto pushProfile = [&](ai::StrategyStep step, std::size_t index) {
+        const bool isFinish = step.finish_pass;
+        const bool enabled = isFinish ? params.enableFinishPass : params.enableRoughPass;
+        if (!enabled)
+        {
+            return;
+        }
+        if (!isFinish && allowanceNominal <= 1e-6)
+        {
+            return;
+        }
+
+        if (step.stepover <= 0.0)
+        {
+            step.stepover = isFinish ? finishStep : roughStep;
+        }
+        const double maxAllowedOver = isFinish ? safeToolDiameter * 0.6 : safeToolDiameter;
+        step.stepover = std::clamp(step.stepover, 0.05, maxAllowedOver);
+
+        if (step.stepdown <= 0.0)
+        {
+            step.stepdown = isFinish ? finishStepDown : baseStepDown;
+        }
+        else
+        {
+            step.stepdown = std::max(0.05, step.stepdown);
+        }
+
+        if (step.type == ai::StrategyStep::Type::Raster)
+        {
+            if (std::abs(step.angle_deg) <= 1e-6)
+            {
+                step.angle_deg = params.rasterAngleDeg;
+            }
+            step.angle_deg = normalizeAngleDeg(step.angle_deg);
+        }
+        else
+        {
+            step.angle_deg = 0.0;
+        }
+
+        PassProfile profile;
+        profile.kind = isFinish ? PassProfile::Kind::Finish : PassProfile::Kind::Rough;
+        profile.step = step;
+        profile.allowance = isFinish ? 0.0 : allowanceNominal;
+        profile.index = index;
+        plan.push_back(std::move(profile));
+    };
+
+    for (std::size_t i = 0; i < decision.steps.size(); ++i)
     {
-        PassProfile rough;
-        rough.kind = PassProfile::Kind::Rough;
-        rough.stepOver = roughStep;
-        rough.maxStepDown = baseStepDown;
-        rough.allowance = allowance;
-        plan.push_back(rough);
+        pushProfile(decision.steps[i], i);
     }
 
-    if (wantFinish || plan.empty())
+    if (plan.empty())
     {
-        PassProfile finish;
-        finish.kind = PassProfile::Kind::Finish;
-        finish.stepOver = plan.empty() ? finishStep : std::min(finishStep, roughStep * 0.75);
-        finish.stepOver = std::max(0.1, std::min(finish.stepOver, safeToolDiameter));
-        finish.maxStepDown = finishStepDown;
-        finish.allowance = 0.0;
-        plan.push_back(finish);
+        ai::StrategyStep fallbackStep;
+        fallbackStep.type = ai::StrategyStep::Type::Raster;
+        fallbackStep.stepover = finishStep;
+        fallbackStep.stepdown = finishStepDown;
+        fallbackStep.angle_deg = normalizeAngleDeg(params.rasterAngleDeg);
+        fallbackStep.finish_pass = true;
+
+        PassProfile profile;
+        profile.kind = PassProfile::Kind::Finish;
+        profile.step = fallbackStep;
+        profile.allowance = 0.0;
+        profile.index = 0;
+        plan.push_back(std::move(profile));
+    }
+    else
+    {
+        for (std::size_t i = 0; i < plan.size(); ++i)
+        {
+            plan[i].index = i;
+        }
     }
 
     return plan;
@@ -929,15 +976,23 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
         progressCallback(0);
     }
 
-    ai::StrategyDecision decision = ai.predict(model, params);
-    if (outDecision)
+    const bool useOverride = params.useStrategyOverride && !params.strategyOverride.empty();
+    ai::StrategyDecision decision;
+    if (useOverride)
     {
-        *outDecision = decision;
+        decision.steps = params.strategyOverride;
     }
-
+    else
+    {
+        decision = ai.predict(model, params);
+    }
     auto passPlan = buildPassPlan(params, decision);
     if (passPlan.empty())
     {
+        if (outDecision)
+        {
+            outDecision->steps.clear();
+        }
         finalizeToolpath(toolpath, params);
         if (progressCallback)
         {
@@ -950,7 +1005,19 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
         return toolpath;
     }
 
+    ai::StrategyDecision appliedDecision;
+    appliedDecision.steps.reserve(passPlan.size());
+    for (const auto& profile : passPlan)
+    {
+        appliedDecision.steps.push_back(profile.step);
+    }
+    if (outDecision)
+    {
+        *outDecision = appliedDecision;
+    }
+
     Toolpath aggregated;
+    aggregated.strategySteps = appliedDecision.steps;
     std::string bannerText;
     std::vector<std::pair<std::size_t, std::size_t>> passRanges;
     passRanges.reserve(passPlan.size());
@@ -965,27 +1032,26 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
         Cutter cutter;
         cutter.length = std::max(3.0 * params.toolDiameter, params.toolDiameter + 5.0);
         cutter.diameter = params.toolDiameter;
-        cutter.type = (decision.strat == ai::StrategyDecision::Strategy::Waterline)
-                          ? Cutter::Type::BallNose
-                          : Cutter::Type::FlatEndmill;
+        const bool isWaterline = (profile.step.type == ai::StrategyStep::Type::Waterline);
+        cutter.type = isWaterline ? Cutter::Type::BallNose : Cutter::Type::FlatEndmill;
 
         UserParams oclParams = params;
-        oclParams.stepOver = profile.stepOver;
+        oclParams.stepOver = profile.step.stepover;
 
         const auto oclStart = std::chrono::steady_clock::now();
-        if (decision.strat == ai::StrategyDecision::Strategy::Waterline)
+        if (isWaterline)
         {
             if (OclAdapter::waterline(model, oclParams, cutter, oclToolpath, oclError))
             {
                 usedOcl = true;
             }
         }
-        else if (decision.strat == ai::StrategyDecision::Strategy::Raster)
+        else
         {
             if (OclAdapter::rasterDropCutter(model,
                                              oclParams,
                                              cutter,
-                                             decision.rasterAngleDeg,
+                                             profile.step.angle_deg,
                                              oclToolpath,
                                              oclError))
             {
@@ -996,6 +1062,10 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
         if (usedOcl && !oclToolpath.empty())
         {
             aggregated = std::move(oclToolpath);
+            for (auto& poly : aggregated.passes)
+            {
+                poly.strategyStep = static_cast<int>(profile.index);
+            }
             const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - oclStart)
                                      .count();
             std::ostringstream oss;
@@ -1031,11 +1101,10 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
             std::string passLog;
             Toolpath passToolpath;
 
-            if (decision.strat == ai::StrategyDecision::Strategy::Waterline)
+            if (profile.step.type == ai::StrategyStep::Type::Waterline)
             {
                 passToolpath = generateWaterlineSlicer(model,
                                                        params,
-                                                       decision,
                                                        profile,
                                                        cancelFlag,
                                                        subProgress,
@@ -1045,7 +1114,6 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
             {
                 passToolpath = generateRasterTopography(model,
                                                         params,
-                                                        decision,
                                                         profile,
                                                         cancelFlag,
                                                         subProgress,
@@ -1056,7 +1124,6 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
             {
                 passToolpath = generateFallbackRaster(model,
                                                       params,
-                                                      decision,
                                                       profile,
                                                       cancelFlag,
                                                       subProgress);
@@ -1078,6 +1145,10 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
 
             if (!passToolpath.passes.empty())
             {
+                for (auto& poly : passToolpath.passes)
+                {
+                    poly.strategyStep = static_cast<int>(profile.index);
+                }
                 const std::size_t offset = aggregated.passes.size();
                 aggregated.passes.insert(aggregated.passes.end(),
                                          std::make_move_iterator(passToolpath.passes.begin()),
@@ -1128,7 +1199,6 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
 
 Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
                                                      const UserParams& params,
-                                                     const ai::StrategyDecision& decision,
                                                      const PassProfile& profile,
                                                      const std::atomic<bool>& cancelFlag,
                                                      const std::function<void(int)>& progressCallback,
@@ -1149,8 +1219,8 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
         return toolpath;
     }
 
-    const double rowSpacing = std::max(0.1, profile.stepOver);
-    const double resolution = computeHeightFieldResolution(profile.stepOver);
+    const double rowSpacing = std::max(0.1, profile.step.stepover);
+    const double resolution = computeHeightFieldResolution(profile.step.stepover);
 
     bool reused = false;
     bool completed = false;
@@ -1199,9 +1269,9 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
 
     const double cutterOffset = cutterOffsetFor(params);
     const double topZ = params.stock.topZ_mm;
-    const double maxDepthPerPass = std::max(profile.maxStepDown, 0.1);
+    const double maxDepthPerPass = std::max(profile.step.stepdown, 0.1);
 
-    const double angleDeg = selectRasterAngleDeg(params, decision, true);
+    const double angleDeg = selectRasterAngleDeg(params, profile.step, true);
     const double angleRad = angleDeg * std::numbers::pi / 180.0;
     const double cosA = std::cos(angleRad);
     const double sinA = std::sin(angleRad);
@@ -1277,6 +1347,7 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
         {
             Polyline poly;
             poly.motion = MotionType::Cut;
+            poly.strategyStep = static_cast<int>(profile.index);
             poly.pts.reserve(points.size());
 
             for (const auto& p : points)
@@ -1369,13 +1440,11 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
 
 Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
                                                     const UserParams& params,
-                                                    const ai::StrategyDecision& decision,
                                                     const PassProfile& profile,
                                                     const std::atomic<bool>& cancelFlag,
                                                     const std::function<void(int)>& progressCallback,
                                                     std::string* logMessage) const
 {
-    (void)decision;
     Toolpath toolpath;
     toolpath.feed = params.feed;
     toolpath.spindle = params.spindle;
@@ -1394,7 +1463,7 @@ Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
         return toolpath;
     }
 
-    const double stepDown = std::max(profile.maxStepDown, 0.1);
+    const double stepDown = std::max(profile.step.stepdown, 0.1);
     const double allowance = profile.allowance;
     const double topZ = params.stock.topZ_mm;
     const double toolRadius = (params.cutterType == UserParams::CutterType::FlatEndmill)
@@ -1467,6 +1536,7 @@ Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
 
                     Polyline poly;
                     poly.motion = MotionType::Cut;
+                    poly.strategyStep = static_cast<int>(profile.index);
                     poly.pts.reserve(loop.size());
                     for (const auto& pt : loop)
                     {
@@ -1520,7 +1590,6 @@ Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
 
 Toolpath ToolpathGenerator::generateFallbackRaster(const render::Model& model,
                                                    const UserParams& params,
-                                                   const ai::StrategyDecision& decision,
                                                    const PassProfile& profile,
                                                    const std::atomic<bool>& cancelFlag,
                                                    const std::function<void(int)>& progressCallback) const
@@ -1544,9 +1613,9 @@ Toolpath ToolpathGenerator::generateFallbackRaster(const render::Model& model,
     const double allowance = profile.allowance;
     const double topZ = params.stock.topZ_mm;
     const float cutPlane = static_cast<float>(std::min(static_cast<double>(minZ) + allowance, topZ));
-    const float step = clampStepOver(profile.stepOver);
+    const float step = clampStepOver(profile.step.stepover);
 
-    const double angleDeg = selectRasterAngleDeg(params, decision, false);
+    const double angleDeg = selectRasterAngleDeg(params, profile.step, false);
     const double angleRad = angleDeg * std::numbers::pi / 180.0;
     const float cosA = static_cast<float>(std::cos(angleRad));
     const float sinA = static_cast<float>(std::sin(angleRad));
@@ -1604,6 +1673,7 @@ Toolpath ToolpathGenerator::generateFallbackRaster(const render::Model& model,
 
         Polyline cut;
         cut.motion = MotionType::Cut;
+        cut.strategyStep = static_cast<int>(profile.index);
         cut.pts.push_back({startCut});
         cut.pts.push_back({endCut});
         if (params.cutDirection == UserParams::CutDirection::Conventional)

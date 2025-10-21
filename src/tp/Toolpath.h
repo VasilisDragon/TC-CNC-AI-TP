@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ai/IPathAI.h"
 #include "tp/Machine.h"
 #include "tp/Stock.h"
 
@@ -26,6 +27,7 @@ struct Polyline
 {
     std::vector<Vertex> pts;
     MotionType motion{MotionType::Cut};
+    int strategyStep{-1};
 
     [[nodiscard]] bool isRapid() const noexcept
     {
@@ -41,6 +43,7 @@ struct Toolpath
     double rapidFeed{0.0};
     Machine machine{};
     Stock stock{};
+    std::vector<ai::StrategyStep> strategySteps;
 
     [[nodiscard]] bool empty() const noexcept
     {

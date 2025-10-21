@@ -221,6 +221,19 @@ StrategyDecision TorchAI::predict(const render::Model& model,
             }
         }
 
+        ai::StrategyStep::Type predictedType =
+            (!decision.steps.empty()) ? decision.steps.front().type : ai::StrategyStep::Type::Raster;
+        double predictedAngle =
+            (!decision.steps.empty()) ? decision.steps.front().angle_deg : kFallbackAngleDeg;
+        double predictedStepOver =
+            (!decision.steps.empty() && decision.steps.front().stepover > 0.0)
+                ? decision.steps.front().stepover
+                : params.stepOver;
+        if (predictedStepOver <= 0.0)
+        {
+            predictedStepOver = std::max(params.toolDiameter * 0.4, 0.1);
+        }
+
         if (logits.defined())
         {
             auto cpuLogits = logits.to(torch::kCPU).flatten();
@@ -228,14 +241,14 @@ StrategyDecision TorchAI::predict(const render::Model& model,
             {
                 const auto probs = torch::softmax(cpuLogits, 0);
                 const int stratIndex = probs.argmax().item<int>();
-                decision.strat = stratIndex == 0 ? StrategyDecision::Strategy::Raster
-                                                 : StrategyDecision::Strategy::Waterline;
+                predictedType = (stratIndex == 0) ? StrategyStep::Type::Raster
+                                                  : StrategyStep::Type::Waterline;
             }
         }
 
         if (angleTensor.defined())
         {
-            decision.rasterAngleDeg = angleTensor.to(torch::kCPU).item<double>();
+            predictedAngle = angleTensor.to(torch::kCPU).item<double>();
         }
 
         if (stepTensor.defined())
@@ -243,13 +256,48 @@ StrategyDecision TorchAI::predict(const render::Model& model,
             const double proposedStep = stepTensor.to(torch::kCPU).item<double>();
             if (proposedStep > 0.0)
             {
-                decision.stepOverMM = proposedStep;
+                predictedStepOver = proposedStep;
             }
         }
 
-        if (decision.stepOverMM <= 0.0)
+        if (predictedStepOver <= 0.0)
         {
-            decision.stepOverMM = params.stepOver;
+            predictedStepOver = params.stepOver;
+        }
+        if (predictedStepOver <= 0.0)
+        {
+            predictedStepOver = std::max(params.toolDiameter * 0.4, 0.1);
+        }
+
+        if (decision.steps.empty())
+        {
+            decision = fallbackDecision(params);
+        }
+
+        for (auto& step : decision.steps)
+        {
+            step.type = predictedType;
+            step.stepover = predictedStepOver;
+            if (step.finish_pass)
+            {
+                if (step.stepdown <= 0.0)
+                {
+                    step.stepdown = std::max(0.1, params.maxDepthPerPass * 0.5);
+                }
+            }
+            else if (step.stepdown <= 0.0)
+            {
+                step.stepdown = params.maxDepthPerPass;
+            }
+
+            if (step.type == StrategyStep::Type::Raster)
+            {
+                step.angle_deg = predictedAngle;
+            }
+            else
+            {
+                step.angle_deg = 0.0;
+            }
         }
 
         m_lastError.clear();
@@ -269,11 +317,19 @@ StrategyDecision TorchAI::predict(const render::Model& model,
 StrategyDecision TorchAI::fallbackDecision(const tp::UserParams& params) const
 {
     StrategyDecision decision;
-    decision.strat = StrategyDecision::Strategy::Raster;
-    decision.rasterAngleDeg = kFallbackAngleDeg;
-    decision.stepOverMM = params.stepOver;
-    decision.roughPass = true;
-    decision.finishPass = true;
+    ai::StrategyStep rough;
+    rough.type = ai::StrategyStep::Type::Raster;
+    rough.stepover = params.stepOver;
+    rough.stepdown = params.maxDepthPerPass;
+    rough.angle_deg = kFallbackAngleDeg;
+    rough.finish_pass = false;
+
+    ai::StrategyStep finish = rough;
+    finish.finish_pass = true;
+    finish.stepdown = std::max(0.1, params.maxDepthPerPass * 0.5);
+
+    decision.steps.push_back(rough);
+    decision.steps.push_back(finish);
     return decision;
 }
 

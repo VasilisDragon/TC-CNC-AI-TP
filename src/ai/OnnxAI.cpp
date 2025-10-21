@@ -160,6 +160,19 @@ StrategyDecision OnnxAI::predict(const render::Model& model,
         Ort::Value* angleValue = nextValue(!m_outputs.angle.empty());
         Ort::Value* stepValue = nextValue(!m_outputs.step.empty());
 
+        StrategyStep::Type predictedType =
+            (!decision.steps.empty()) ? decision.steps.front().type : StrategyStep::Type::Raster;
+        double predictedAngle =
+            (!decision.steps.empty()) ? decision.steps.front().angle_deg : kFallbackAngleDeg;
+        double predictedStepOver =
+            (!decision.steps.empty() && decision.steps.front().stepover > 0.0)
+                ? decision.steps.front().stepover
+                : params.stepOver;
+        if (predictedStepOver <= 0.0)
+        {
+            predictedStepOver = std::max(params.toolDiameter * 0.4, 0.1);
+        }
+
         if (logitsValue && logitsValue->IsTensor())
         {
             Ort::TensorTypeAndShapeInfo shapeInfo = logitsValue->GetTensorTypeAndShapeInfo();
@@ -170,8 +183,7 @@ StrategyDecision OnnxAI::predict(const render::Model& model,
                 const double maxLogit = std::max(static_cast<double>(data[0]), static_cast<double>(data[1]));
                 const double exp0 = std::exp(static_cast<double>(data[0]) - maxLogit);
                 const double exp1 = std::exp(static_cast<double>(data[1]) - maxLogit);
-                decision.strat = (exp1 > exp0) ? StrategyDecision::Strategy::Waterline
-                                               : StrategyDecision::Strategy::Raster;
+                predictedType = (exp1 > exp0) ? StrategyStep::Type::Waterline : StrategyStep::Type::Raster;
             }
         }
 
@@ -181,7 +193,7 @@ StrategyDecision OnnxAI::predict(const render::Model& model,
             if (info.GetElementCount() >= 1)
             {
                 const float* data = angleValue->GetTensorData<float>();
-                decision.rasterAngleDeg = data[0];
+                predictedAngle = data[0];
             }
         }
 
@@ -194,14 +206,49 @@ StrategyDecision OnnxAI::predict(const render::Model& model,
                 const double value = data[0];
                 if (value > 0.0)
                 {
-                    decision.stepOverMM = value;
+                    predictedStepOver = value;
                 }
             }
         }
 
-        if (decision.stepOverMM <= 0.0)
+        if (predictedStepOver <= 0.0)
         {
-            decision.stepOverMM = params.stepOver;
+            predictedStepOver = params.stepOver;
+        }
+        if (predictedStepOver <= 0.0)
+        {
+            predictedStepOver = std::max(params.toolDiameter * 0.4, 0.1);
+        }
+
+        if (decision.steps.empty())
+        {
+            decision = fallbackDecision(params);
+        }
+
+        for (auto& step : decision.steps)
+        {
+            step.type = predictedType;
+            step.stepover = predictedStepOver;
+            if (step.finish_pass)
+            {
+                if (step.stepdown <= 0.0)
+                {
+                    step.stepdown = std::max(0.1, params.maxDepthPerPass * 0.5);
+                }
+            }
+            else if (step.stepdown <= 0.0)
+            {
+                step.stepdown = params.maxDepthPerPass;
+            }
+
+            if (step.type == StrategyStep::Type::Raster)
+            {
+                step.angle_deg = predictedAngle;
+            }
+            else
+            {
+                step.angle_deg = 0.0;
+            }
         }
 
         m_lastError.clear();
@@ -221,11 +268,19 @@ StrategyDecision OnnxAI::predict(const render::Model& model,
 StrategyDecision OnnxAI::fallbackDecision(const tp::UserParams& params) const
 {
     StrategyDecision decision;
-    decision.strat = StrategyDecision::Strategy::Raster;
-    decision.rasterAngleDeg = kFallbackAngleDeg;
-    decision.stepOverMM = params.stepOver;
-    decision.roughPass = true;
-    decision.finishPass = true;
+    StrategyStep rough;
+    rough.type = StrategyStep::Type::Raster;
+    rough.stepover = params.stepOver;
+    rough.stepdown = params.maxDepthPerPass;
+    rough.angle_deg = kFallbackAngleDeg;
+    rough.finish_pass = false;
+
+    StrategyStep finish = rough;
+    finish.finish_pass = true;
+    finish.stepdown = std::max(0.1, params.maxDepthPerPass * 0.5);
+
+    decision.steps.push_back(rough);
+    decision.steps.push_back(finish);
     return decision;
 }
 

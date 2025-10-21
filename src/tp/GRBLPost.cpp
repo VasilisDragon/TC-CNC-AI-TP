@@ -1,5 +1,7 @@
 #include "tp/GRBLPost.h"
 
+#include "ai/IPathAI.h"
+
 #include <glm/geometric.hpp>
 #include <glm/glm.hpp>
 
@@ -296,8 +298,47 @@ std::string GRBLPost::generate(const tp::Toolpath& toolpath,
     const double maxChordError = std::max(0.0, params.post.maxArcChordError_mm);
     const bool arcsEnabled = (maxChordError > 0.0);
 
+    auto stepComment = [&](int stepIndex) -> std::string {
+        if (stepIndex < 0)
+        {
+            return {};
+        }
+        const std::size_t idx = static_cast<std::size_t>(stepIndex);
+        if (idx >= toolpath.strategySteps.size())
+        {
+            return {};
+        }
+        const ai::StrategyStep& step = toolpath.strategySteps[idx];
+        std::ostringstream comment;
+        comment.setf(std::ios::fixed);
+        comment.precision(3);
+        comment << "(STEP " << (idx + 1) << " "
+                << ((step.type == ai::StrategyStep::Type::Raster) ? "Raster" : "Waterline")
+                << (step.finish_pass ? " finish" : " rough")
+                << " stepover=" << step.stepover << "mm"
+                << " stepdown=" << step.stepdown << "mm";
+        if (step.type == ai::StrategyStep::Type::Raster)
+        {
+            comment.precision(1);
+            comment << " angle=" << step.angle_deg << "deg";
+        }
+        comment << ")";
+        return comment.str();
+    };
+
+    int currentStep = -1;
     for (const tp::Polyline& poly : toolpath.passes)
     {
+        if (poly.strategyStep != currentStep)
+        {
+            currentStep = poly.strategyStep;
+            const std::string comment = stepComment(currentStep);
+            if (!comment.empty())
+            {
+                out << comment << kNL;
+            }
+        }
+
         std::vector<glm::dvec3> points = sanitizePolyline(poly);
         if (points.size() < 2)
         {

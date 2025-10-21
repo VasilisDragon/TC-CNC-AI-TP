@@ -11,6 +11,7 @@
 #include "ai/ModelManager.h"
 #include "ai/IPathAI.h"
 #include "ai/TorchAI.h"
+#include "ai/StrategySerialization.h"
 #ifdef AI_WITH_ONNXRUNTIME
 #    include "ai/OnnxAI.h"
 #endif
@@ -102,6 +103,36 @@ namespace
 QString formatTimestamped(const QString& text)
 {
     return QStringLiteral("[%1] %2").arg(QDateTime::currentDateTime().toString(Qt::ISODateWithMs), text);
+}
+
+QString formatStrategySteps(const std::vector<ai::StrategyStep>& steps)
+{
+    if (steps.empty())
+    {
+        return QObject::tr("(no steps)");
+    }
+
+    QStringList parts;
+    parts.reserve(static_cast<int>(steps.size()));
+    for (int i = 0; i < static_cast<int>(steps.size()); ++i)
+    {
+        const ai::StrategyStep& step = steps[i];
+        const QString type = (step.type == ai::StrategyStep::Type::Raster) ? QObject::tr("Raster")
+                                                                           : QObject::tr("Waterline");
+        const QString phase = step.finish_pass ? QObject::tr("finish") : QObject::tr("rough");
+        QString part = QObject::tr("[%1] %2 %3 step-over=%4 mm step-down=%5 mm")
+                           .arg(i + 1)
+                           .arg(type)
+                           .arg(phase)
+                           .arg(step.stepover, 0, 'f', 3)
+                           .arg(step.stepdown, 0, 'f', 3);
+        if (step.type == ai::StrategyStep::Type::Raster)
+        {
+            part += QObject::tr(" angle=%1 deg").arg(step.angle_deg, 0, 'f', 1);
+        }
+        parts << part;
+    }
+    return parts.join(QStringLiteral("; "));
 }
 
 std::unique_ptr<QAction> makeAction(QObject* parent, const QString& text, const QKeySequence& shortcut = {})
@@ -2263,17 +2294,13 @@ void MainWindow::startGenerateWorker(const tp::UserParams& settings)
                                            .arg(common::feedSuffix(m_units))
                                            .arg(rpmText));
 
-                const QString strategyName = (decision.strat == ai::StrategyDecision::Strategy::Raster)
-                                                 ? tr("Raster")
-                                                 : tr("Waterline");
-                const QString angleText = QLocale().toString(decision.rasterAngleDeg, 'f', 1);
-                const QString stepText = QLocale().toString(decision.stepOverMM, 'f', 3);
                 logMessage(tr("Toolpath generated in %1 ms.").arg(elapsed));
-                logMessage(tr("AI: Using %1, decision: %2 angle=%3 deg, step-over=%4 mm")
-                               .arg(m_aiModelLabel)
-                               .arg(strategyName)
-                               .arg(angleText)
-                               .arg(stepText));
+                const QString stepSummary = formatStrategySteps(decision.steps);
+                logMessage(tr("AI: Using %1, steps: %2").arg(m_aiModelLabel, stepSummary));
+                if (m_toolpathSettings)
+                {
+                    m_toolpathSettings->setAiStrategyPreview(decision.steps);
+                }
 
                 if (m_simulation)
                 {
@@ -2694,20 +2721,20 @@ void MainWindow::handleAiTestRequest(AiPreferencesDialog& dialog)
     const ai::StrategyDecision decision = aiInstance->predict(*m_currentModel, params);
     const double latency = runtimeLatencyMs(aiInstance.get());
     const QString deviceText = runtimeDevice(aiInstance.get());
-    const QString stratText = (decision.strat == ai::StrategyDecision::Strategy::Raster)
-                                  ? tr("Raster")
-                                  : tr("Waterline");
     const QString badge = runtimeBadge(aiInstance.get());
 
-    const QString summary = tr("%1 %2 ms via %3, %4 @ %5 deg, step %6 mm")
+    const QString stepSummary = formatStrategySteps(decision.steps);
+    const QString summary = tr("%1 %2 ms via %3, steps: %4")
                                 .arg(badge)
                                 .arg(QString::number(latency, 'f', 2))
                                 .arg(deviceText)
-                                .arg(stratText)
-                                .arg(QString::number(decision.rasterAngleDeg, 'f', 1))
-                                .arg(QString::number(decision.stepOverMM, 'f', 3));
+                                .arg(stepSummary);
 
     dialog.setLastTestResult(summary);
+    if (m_toolpathSettings)
+    {
+        m_toolpathSettings->setAiStrategyPreview(decision.steps);
+    }
     const QString error = runtimeLastError(aiInstance.get());
     if (!error.isEmpty())
     {
@@ -2892,6 +2919,18 @@ void MainWindow::loadSettings()
     params.rampRadius = settings.value(QStringLiteral("params/rampRadius"), params.rampRadius).toDouble();
     params.leadInLength = settings.value(QStringLiteral("params/leadInLength"), params.leadInLength).toDouble();
     params.leadOutLength = settings.value(QStringLiteral("params/leadOutLength"), params.leadOutLength).toDouble();
+    params.useStrategyOverride =
+        settings.value(QStringLiteral("params/useStrategyOverride"), params.useStrategyOverride).toBool();
+    params.strategyOverride.clear();
+    const QString strategyJson = settings.value(QStringLiteral("params/strategyOverride")).toString();
+    if (!strategyJson.isEmpty())
+    {
+        const QJsonDocument doc = QJsonDocument::fromJson(strategyJson.toUtf8());
+        if (doc.isArray())
+        {
+            params.strategyOverride = ai::stepsFromJson(doc.array());
+        }
+    }
     params.post.maxArcChordError_mm = settings.value(QStringLiteral("post/max_arc_chord_error"),
                                                      params.post.maxArcChordError_mm).toDouble();
     params.cutDirection = static_cast<tp::UserParams::CutDirection>(
@@ -2987,6 +3026,10 @@ void MainWindow::saveSettings() const
         settings.setValue(QStringLiteral("params/leadInLength"), params.leadInLength);
         settings.setValue(QStringLiteral("params/leadOutLength"), params.leadOutLength);
         settings.setValue(QStringLiteral("params/cutDirection"), static_cast<int>(params.cutDirection));
+        settings.setValue(QStringLiteral("params/useStrategyOverride"), params.useStrategyOverride);
+        const QJsonArray overrideArray = ai::stepsToJson(params.strategyOverride);
+        settings.setValue(QStringLiteral("params/strategyOverride"),
+                          QString::fromUtf8(QJsonDocument(overrideArray).toJson(QJsonDocument::Compact)));
         settings.setValue(QStringLiteral("post/max_arc_chord_error"), params.post.maxArcChordError_mm);
     }
 
