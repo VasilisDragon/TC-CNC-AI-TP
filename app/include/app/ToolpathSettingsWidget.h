@@ -24,8 +24,8 @@ class ToolpathSettingsWidget : public QWidget
 public:
     explicit ToolpathSettingsWidget(QWidget* parent = nullptr);
 
-    void setUnits(common::Unit unit);
-    void setToolLibrary(const QVector<common::Tool>& tools, common::Unit unit);
+    void setUnits(common::UnitSystem unit);
+    void setToolLibrary(const QVector<common::Tool>& tools, common::UnitSystem unit);
     void setSelectedToolId(const QString& id, bool applyDefaults);
     QString currentToolId() const;
 
@@ -80,7 +80,7 @@ private:
     QPushButton* m_removeStrategyButton{nullptr};
 
     QVector<common::Tool> m_tools;
-    common::Unit m_unit{common::Unit::Millimeters};
+    common::UnitSystem m_unit{common::kInternalUnitSystem};
     tp::UserParams m_paramsMm{};
     bool m_blockToolDefaults{false};
     bool m_blockStrategySignals{false};

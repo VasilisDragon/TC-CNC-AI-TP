@@ -330,7 +330,7 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
     validateInputs();
 }
 
-void ToolpathSettingsWidget::setUnits(common::Unit unit)
+void ToolpathSettingsWidget::setUnits(common::UnitSystem unit)
 {
     if (unit == m_unit)
     {
@@ -345,7 +345,7 @@ void ToolpathSettingsWidget::setUnits(common::Unit unit)
     syncWidgetsFromParams();
 }
 
-void ToolpathSettingsWidget::setToolLibrary(const QVector<common::Tool>& tools, common::Unit unit)
+void ToolpathSettingsWidget::setToolLibrary(const QVector<common::Tool>& tools, common::UnitSystem unit)
 {
     m_tools = tools;
     m_unit = unit;

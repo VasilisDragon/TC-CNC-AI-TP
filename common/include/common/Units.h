@@ -5,22 +5,24 @@
 namespace common
 {
 
-enum class Unit
+enum class UnitSystem
 {
     Millimeters,
     Inches
 };
 
-double convertLength(double value, Unit from, Unit to);
-double toMillimeters(double value, Unit from);
-double fromMillimeters(double valueMm, Unit to);
+constexpr UnitSystem kInternalUnitSystem = UnitSystem::Millimeters;
 
-QString unitName(Unit unit);
-QString unitSuffix(Unit unit);
-QString feedSuffix(Unit unit);
-QString unitKey(Unit unit);
+double convertLength(double value, UnitSystem from, UnitSystem to);
+double toMillimeters(double value, UnitSystem from);
+double fromMillimeters(double valueMm, UnitSystem to);
 
-Unit unitFromString(const QString& text, Unit fallback = Unit::Millimeters);
-QString formatLength(double valueMm, Unit unit, int precision = 3);
+QString unitName(UnitSystem unit);
+QString unitSuffix(UnitSystem unit);
+QString feedSuffix(UnitSystem unit);
+QString unitKey(UnitSystem unit);
+
+UnitSystem unitFromString(const QString& text, UnitSystem fallback = UnitSystem::Millimeters);
+QString formatLength(double valueMm, UnitSystem unit, int precision = 3);
 
 } // namespace common

@@ -29,7 +29,11 @@ Legend
 
 ## Post Processing & Export
 - [Verified] **Post interface** `tp::IPost` defines the contract that exporters rely on for controller-specific output (`src/tp/IPost.h:12`).
-- [Verified] **GRBL post** `tp::GRBLPost` emits standard GRBL G-code, fitting constant-Z spans into G2/G3 arcs capped by `post.max_arc_chord_error` while honoring unit scaling and machine feed limits (`src/tp/GRBLPost.cpp:277`).
+- [Verified] **Template DSL & base** `tp::TemplateEngine` resolves `{{tokens}}`, conditional blocks, and `{{else}}` branches while `tp::GCodePostBase` centralizes motion formatting, arc fitting, and header/footer templating (`src/tp/TemplateEngine.cpp:1`, `src/tp/GCodePostBase.cpp:1`).
+- [Verified] **GRBL post** `tp::GRBLPost` reuses the shared base to emit GRBL headers, spindle control, and arc-enabled motion planning (`src/tp/GRBLPost.cpp:1`).
+- [Verified] **Fanuc post** `tp::FanucPost` layers a work-offset centric header (`G54`, `G17`, `G90`, `G94`) and terminates programs with `M30` (`src/tp/FanucPost.cpp:1`).
+- [Verified] **Marlin post** `tp::MarlinPost` disables spindle output, reports optional arc usage in comments, and wraps up with `M84` motor release commands (`src/tp/MarlinPost.cpp:1`).
+- [Verified] **Heidenhain post** `tp::HeidenhainPost` outputs plain-language `BEGIN/END PGM` blocks with `L` motions that inline feed rates and fall back to linearized arcs (`src/tp/HeidenhainPost.cpp:1`).
 - [Verified] **Exporter** `tp::GCodeExporter::exportToFile` streams the selected post, embeds a tolerance fingerprint, and reports errors back to the caller (`src/tp/GCodeExporter.cpp:80`).
 - [Verified] **UI wiring** `MainWindow::saveToolpathToFile` presents post options, persists the file, and surfaces a preview in the console dock (`src/app/MainWindow.cpp:3027`).
 

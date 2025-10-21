@@ -29,3 +29,13 @@ Measured times are averages over three runs per configuration. "After" numbers w
 - Raster and waterline generation announce duration, output polylines/loops, and whether cached height fields were reused.
 
 Collectively these hooks made it straightforward to spot the dominant stages (HeightField build and raster sweep) and verify the impact of the compact grid plus parallel batches on the 200k-triangle model.
+
+## Waterline Parallel Slice Check
+- `tp_waterline_parallel_consistency_tests` compares sequential and parallel `ZSlicer::slice` output loop-by-loop with a ±1e-6 tolerance to catch regressions before shipping.
+- Define `TP_ENABLE_ZSLICER_BENCHMARK` on any target and call `tp::waterline::runZSlicerBenchmark(...)` to print average/min/max timings for a chosen plane slice. The helper uses the new parallel path and is guarded so release builds stay lean by default.
+- Handy scratch command while iterating locally:
+  ```
+  cmake --build build/ninja-release --target tp_waterline_parallel_consistency_tests
+  ctest -R tp_waterline_parallel_consistency
+  ```
+  Flip the `TP_ENABLE_ZSLICER_BENCHMARK` flag in your CMake preset or add `target_compile_definitions` for ad-hoc profiling runs.

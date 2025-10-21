@@ -1,4 +1,5 @@
 add_library(common STATIC
+    include/common/Enforce.h
     include/common/logging.h
     include/common/math.h
     include/common/Units.h
