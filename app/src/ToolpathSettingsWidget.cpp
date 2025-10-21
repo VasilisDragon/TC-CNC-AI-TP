@@ -1,16 +1,21 @@
 #include "app/ToolpathSettingsWidget.h"
 
 #include <QtCore/QSignalBlocker>
+#include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QHeaderView>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSizePolicy>
+#include <QtWidgets/QTableWidget>
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
+#include <vector>
 
 namespace app
 {
@@ -36,6 +41,21 @@ tp::UserParams::CutterType cutterTypeFromTool(const common::Tool& tool)
         return tp::UserParams::CutterType::BallNose;
     }
     return tp::UserParams::CutterType::FlatEndmill;
+}
+
+std::vector<ai::StrategyStep> defaultStrategySteps()
+{
+    ai::StrategyStep rough;
+    rough.type = ai::StrategyStep::Type::Raster;
+    rough.stepover = 3.0;
+    rough.stepdown = 1.0;
+    rough.angle_deg = 45.0;
+    rough.finish_pass = false;
+
+    ai::StrategyStep finish = rough;
+    finish.finish_pass = true;
+    finish.stepdown = 0.5;
+    return {rough, finish};
 }
 }
 
@@ -144,6 +164,36 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
     m_paramsMm.leaveStock_mm = m_paramsMm.stockAllowance_mm;
 
     layout->addLayout(form);
+
+    auto* strategyLabel = new QLabel(tr("Strategy Steps"), this);
+    strategyLabel->setContentsMargins(0, 8, 0, 0);
+    layout->addWidget(strategyLabel);
+
+    m_strategyOverrideCheck = new QCheckBox(tr("Override AI plan"), this);
+    layout->addWidget(m_strategyOverrideCheck);
+
+    m_strategyTable = new QTableWidget(this);
+    m_strategyTable->setColumnCount(5);
+    m_strategyTable->setHorizontalHeaderLabels(
+        {tr("Type"), tr("Step-over (mm)"), tr("Step-down (mm)"), tr("Angle (deg)"), tr("Finish")});
+    m_strategyTable->horizontalHeader()->setStretchLastSection(true);
+    m_strategyTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    m_strategyTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_strategyTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_strategyTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    layout->addWidget(m_strategyTable);
+
+    auto* strategyButtons = new QHBoxLayout();
+    strategyButtons->setContentsMargins(0, 0, 0, 0);
+    strategyButtons->setSpacing(6);
+    m_addStrategyButton = new QPushButton(tr("Add Step"), this);
+    m_removeStrategyButton = new QPushButton(tr("Remove Step"), this);
+    strategyButtons->addWidget(m_addStrategyButton);
+    strategyButtons->addWidget(m_removeStrategyButton);
+    strategyButtons->addStretch(1);
+    layout->addLayout(strategyButtons);
+
+    layout->addSpacing(6);
     layout->addStretch(1);
 
     m_generateButton = new QPushButton(tr("Generate Toolpath"), this);
@@ -225,6 +275,28 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
         syncParamsFromWidgets();
     });
 
+    connect(m_strategyOverrideCheck, &QCheckBox::toggled, this, [this](bool) {
+        if (m_blockStrategySignals)
+        {
+            return;
+        }
+        refreshStrategyTable();
+        syncStrategyParams();
+    });
+
+    connect(m_addStrategyButton, &QPushButton::clicked, this, &ToolpathSettingsWidget::appendStrategyStep);
+    connect(m_removeStrategyButton, &QPushButton::clicked, this, &ToolpathSettingsWidget::removeStrategyStep);
+    connect(m_strategyTable->selectionModel(),
+            &QItemSelectionModel::selectionChanged,
+            this,
+            [this](const QItemSelection&, const QItemSelection&) {
+                const bool overrideEnabled = m_strategyOverrideCheck && m_strategyOverrideCheck->isChecked();
+                if (m_removeStrategyButton)
+                {
+                    m_removeStrategyButton->setEnabled(overrideEnabled && m_strategyTable->currentRow() >= 0);
+                }
+            });
+
     connect(m_generateButton, &QPushButton::clicked, this, &ToolpathSettingsWidget::emitGenerate);
 
     m_paramsMm.toolDiameter = 6.0;
@@ -242,6 +314,15 @@ ToolpathSettingsWidget::ToolpathSettingsWidget(QWidget* parent)
     m_paramsMm.leadInLength = 0.0;
     m_paramsMm.leadOutLength = 0.0;
     m_paramsMm.cutDirection = tp::UserParams::CutDirection::Climb;
+
+    m_aiPreviewSteps = defaultStrategySteps();
+    m_strategySteps = m_aiPreviewSteps;
+    if (m_strategyOverrideCheck)
+    {
+        m_strategyOverrideCheck->setChecked(false);
+    }
+    refreshStrategyTable();
+    syncStrategyParams();
 
     updateRanges();
     applyUnitsToWidgets();
@@ -583,6 +664,7 @@ void ToolpathSettingsWidget::syncWidgetsFromParams()
             m_cutDirection->setCurrentIndex(index);
         }
     }
+    setStrategyOverride(m_paramsMm.strategyOverride, m_paramsMm.useStrategyOverride);
 }
 
 void ToolpathSettingsWidget::syncParamsFromWidgets()
@@ -630,6 +712,231 @@ void ToolpathSettingsWidget::syncParamsFromWidgets()
     {
         const int value = m_cutDirection->currentData().toInt();
         m_paramsMm.cutDirection = static_cast<tp::UserParams::CutDirection>(value);
+    }
+    syncStrategyParams();
+}
+
+void ToolpathSettingsWidget::setStrategyOverride(const std::vector<ai::StrategyStep>& steps, bool enabled)
+{
+    m_strategySteps = steps.empty() ? defaultStrategySteps() : steps;
+    if (m_strategyOverrideCheck)
+    {
+        QSignalBlocker blocker(m_strategyOverrideCheck);
+        m_strategyOverrideCheck->setChecked(enabled);
+    }
+    refreshStrategyTable();
+}
+
+void ToolpathSettingsWidget::setAiStrategyPreview(const std::vector<ai::StrategyStep>& steps)
+{
+    m_aiPreviewSteps = steps.empty() ? defaultStrategySteps() : steps;
+    if (!m_strategyOverrideCheck || !m_strategyOverrideCheck->isChecked())
+    {
+        refreshStrategyTable();
+    }
+}
+
+void ToolpathSettingsWidget::refreshStrategyTable()
+{
+    if (!m_strategyTable)
+    {
+        return;
+    }
+
+    const bool overrideEnabled = m_strategyOverrideCheck && m_strategyOverrideCheck->isChecked();
+    if (overrideEnabled && m_strategySteps.empty())
+    {
+        m_strategySteps = defaultStrategySteps();
+    }
+    if (!overrideEnabled && m_aiPreviewSteps.empty())
+    {
+        m_aiPreviewSteps = defaultStrategySteps();
+    }
+
+    const auto& sourceSteps = overrideEnabled ? m_strategySteps : m_aiPreviewSteps;
+
+    m_blockStrategySignals = true;
+    m_strategyTable->setRowCount(0);
+    m_strategyTable->setRowCount(static_cast<int>(sourceSteps.size()));
+
+    for (int row = 0; row < static_cast<int>(sourceSteps.size()); ++row)
+    {
+        const ai::StrategyStep& step = sourceSteps[row];
+
+        auto* angleSpin = new QDoubleSpinBox(m_strategyTable);
+        angleSpin->setDecimals(1);
+        angleSpin->setRange(-180.0, 180.0);
+        angleSpin->setSingleStep(5.0);
+        angleSpin->setSuffix(QStringLiteral(" deg"));
+        angleSpin->setValue(step.angle_deg);
+
+        auto* typeBox = new QComboBox(m_strategyTable);
+        typeBox->addItem(tr("Raster"));
+        typeBox->addItem(tr("Waterline"));
+        typeBox->setCurrentIndex(step.type == ai::StrategyStep::Type::Raster ? 0 : 1);
+        typeBox->setEnabled(overrideEnabled);
+
+        auto* stepoverSpin = new QDoubleSpinBox(m_strategyTable);
+        stepoverSpin->setDecimals(3);
+        stepoverSpin->setRange(0.0, 500.0);
+        stepoverSpin->setSingleStep(0.1);
+        stepoverSpin->setSuffix(QStringLiteral(" mm"));
+        stepoverSpin->setValue(step.stepover);
+        stepoverSpin->setEnabled(overrideEnabled);
+
+        auto* stepdownSpin = new QDoubleSpinBox(m_strategyTable);
+        stepdownSpin->setDecimals(3);
+        stepdownSpin->setRange(0.0, 500.0);
+        stepdownSpin->setSingleStep(0.1);
+        stepdownSpin->setSuffix(QStringLiteral(" mm"));
+        stepdownSpin->setValue(step.stepdown);
+        stepdownSpin->setEnabled(overrideEnabled);
+
+        QWidget* finishContainer = new QWidget(m_strategyTable);
+        auto* finishLayout = new QHBoxLayout(finishContainer);
+        finishLayout->setContentsMargins(0, 0, 0, 0);
+        finishLayout->setAlignment(Qt::AlignCenter);
+        auto* finishCheck = new QCheckBox(finishContainer);
+        finishCheck->setChecked(step.finish_pass);
+        finishCheck->setEnabled(overrideEnabled);
+        finishLayout->addWidget(finishCheck);
+
+        m_strategyTable->setCellWidget(row, 0, typeBox);
+        m_strategyTable->setCellWidget(row, 1, stepoverSpin);
+        m_strategyTable->setCellWidget(row, 2, stepdownSpin);
+        m_strategyTable->setCellWidget(row, 3, angleSpin);
+        m_strategyTable->setCellWidget(row, 4, finishContainer);
+
+        angleSpin->setEnabled(overrideEnabled && step.type == ai::StrategyStep::Type::Raster);
+
+        if (overrideEnabled)
+        {
+            connect(typeBox, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, row, angleSpin](int index) {
+                if (row < 0 || row >= static_cast<int>(m_strategySteps.size()))
+                {
+                    return;
+                }
+                m_strategySteps[row].type = (index == 0) ? ai::StrategyStep::Type::Raster
+                                                         : ai::StrategyStep::Type::Waterline;
+                if (angleSpin)
+                {
+                    const bool enableAngle = (index == 0);
+                    angleSpin->setEnabled(enableAngle);
+                    if (!enableAngle)
+                    {
+                        angleSpin->setValue(0.0);
+                        m_strategySteps[row].angle_deg = 0.0;
+                    }
+                }
+                syncStrategyParams();
+            });
+            connect(stepoverSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, row](double value) {
+                if (row < 0 || row >= static_cast<int>(m_strategySteps.size()))
+                {
+                    return;
+                }
+                m_strategySteps[row].stepover = value;
+                syncStrategyParams();
+            });
+            connect(stepdownSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, row](double value) {
+                if (row < 0 || row >= static_cast<int>(m_strategySteps.size()))
+                {
+                    return;
+                }
+                m_strategySteps[row].stepdown = value;
+                syncStrategyParams();
+            });
+            connect(angleSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, row](double value) {
+                if (row < 0 || row >= static_cast<int>(m_strategySteps.size()))
+                {
+                    return;
+                }
+                m_strategySteps[row].angle_deg = value;
+                syncStrategyParams();
+            });
+            connect(finishCheck, &QCheckBox::toggled, this, [this, row](bool checked) {
+                if (row < 0 || row >= static_cast<int>(m_strategySteps.size()))
+                {
+                    return;
+                }
+                m_strategySteps[row].finish_pass = checked;
+                syncStrategyParams();
+            });
+        }
+    }
+
+    if (m_addStrategyButton)
+    {
+        m_addStrategyButton->setEnabled(overrideEnabled);
+    }
+    if (m_removeStrategyButton)
+    {
+        m_removeStrategyButton->setEnabled(overrideEnabled && m_strategyTable->currentRow() >= 0);
+    }
+
+    m_blockStrategySignals = false;
+}
+
+void ToolpathSettingsWidget::appendStrategyStep()
+{
+    if (!m_strategyOverrideCheck)
+    {
+        return;
+    }
+    if (!m_strategyOverrideCheck->isChecked())
+    {
+        m_strategyOverrideCheck->setChecked(true);
+    }
+
+    ai::StrategyStep step;
+    if (!m_strategySteps.empty())
+    {
+        step = m_strategySteps.back();
+    }
+    else
+    {
+        const auto defaults = defaultStrategySteps();
+        step = defaults.front();
+    }
+    step.finish_pass = false;
+    m_strategySteps.push_back(step);
+    refreshStrategyTable();
+    syncStrategyParams();
+}
+
+void ToolpathSettingsWidget::removeStrategyStep()
+{
+    if (!m_strategyOverrideCheck || !m_strategyOverrideCheck->isChecked())
+    {
+        return;
+    }
+
+    const int row = m_strategyTable ? m_strategyTable->currentRow() : -1;
+    if (row < 0 || row >= static_cast<int>(m_strategySteps.size()))
+    {
+        return;
+    }
+
+    m_strategySteps.erase(m_strategySteps.begin() + row);
+    refreshStrategyTable();
+    syncStrategyParams();
+}
+
+void ToolpathSettingsWidget::syncStrategyParams()
+{
+    if (m_blockStrategySignals || !m_strategyOverrideCheck)
+    {
+        return;
+    }
+
+    m_paramsMm.useStrategyOverride = m_strategyOverrideCheck->isChecked();
+    if (m_paramsMm.useStrategyOverride)
+    {
+        m_paramsMm.strategyOverride = m_strategySteps;
+    }
+    else
+    {
+        m_paramsMm.strategyOverride.clear();
     }
 }
 

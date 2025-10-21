@@ -195,3 +195,7 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/samples/
     FILES_MATCHING PATTERN "*.stl"
 )
 
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/train/
+    DESTINATION ${CMAKE_INSTALL_BINDIR}/train
+    PATTERN "__pycache__" EXCLUDE
+)

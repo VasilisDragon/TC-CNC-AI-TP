@@ -12,6 +12,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QCheckBox;
 class QPushButton;
+class QTableWidget;
 
 namespace app
 {
@@ -30,6 +31,8 @@ public:
 
     void setParameters(const tp::UserParams& paramsMm);
     tp::UserParams currentParameters() const;
+    void setStrategyOverride(const std::vector<ai::StrategyStep>& steps, bool enabled);
+    void setAiStrategyPreview(const std::vector<ai::StrategyStep>& steps);
 
     Q_SIGNALS:
     void generateRequested(const tp::UserParams& settings);
@@ -49,6 +52,10 @@ private:
     void refreshToolComboLabels();
     double displayFromMm(double valueMm) const;
     double mmFromDisplay(double value) const;
+    void refreshStrategyTable();
+    void appendStrategyStep();
+    void removeStrategyStep();
+    void syncStrategyParams();
 
     QComboBox* m_toolCombo{nullptr};
     QDoubleSpinBox* m_toolDiameter{nullptr};
@@ -67,11 +74,18 @@ private:
     QDoubleSpinBox* m_leaveStock{nullptr};
     QCheckBox* m_useHeightField{nullptr};
     QPushButton* m_generateButton{nullptr};
+    QCheckBox* m_strategyOverrideCheck{nullptr};
+    QTableWidget* m_strategyTable{nullptr};
+    QPushButton* m_addStrategyButton{nullptr};
+    QPushButton* m_removeStrategyButton{nullptr};
 
     QVector<common::Tool> m_tools;
     common::Unit m_unit{common::Unit::Millimeters};
     tp::UserParams m_paramsMm{};
     bool m_blockToolDefaults{false};
+    bool m_blockStrategySignals{false};
+    std::vector<ai::StrategyStep> m_strategySteps;
+    std::vector<ai::StrategyStep> m_aiPreviewSteps;
 };
 
 } // namespace app
