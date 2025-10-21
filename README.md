@@ -34,7 +34,7 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
 - `src/` - Primary module tree:
   - `src/app/` - Main window, dialogs, training workflow panels, and application glue.
   - `src/ai/` - `FeatureExtractor`, `TorchAI`, `OnnxAI`, and `ModelManager` bridging between models and UI.
-  - `src/common/` - Runtime units, tool metadata, and JSON-backed tool libraries.
+  - `src/common/` - Runtime units, tool metadata, and JSON-backed tool libraries. The shared `UnitSystem` keeps millimeters as the canonical internal representation while formatting inches for the UI and post processors.
   - `src/io/` - Background worker threads and Assimp importer plumbing.
   - `src/render/` - OpenGL viewer widgets and simulation controller for time-based playback.
   - `src/tp/` - Toolpath generation core, height-field sampling, G-code export, and optional OpenCAMLib bindings.
@@ -47,7 +47,7 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
   - `requirements.txt` (pip dependencies).
 - `models/` - Example TorchScript/ONNX artefacts and metadata (e.g., `strategy_v2.pt.model.json`).
 - `samples/` - STL sample geometry for quick imports.
-- `testdata/` - Curated smoke datasets for evaluation (e.g., `testdata/eval/smoke` for the offline metrics script).
+- `testdata/` - Curated smoke datasets for evaluation (e.g., `testdata/eval/smoke` for the offline metrics script, and `testdata/cad/tiny_block.step` for the OCCT importer sanity test).
 - `tests/` - Doctest-powered C++ unit and smoke tests (`basic_sanity.cpp`, `onnx_ai_smoke.cpp`, etc.).
 - `docs/` - Architecture notes, build instructions, QA checklists, and deployment playbooks. See `docs/map.md` for a verified module map tying targets to their responsibilities.
 - `scripts/verify_env.ps1` - PowerShell helper to validate a Windows build environment.
@@ -65,7 +65,7 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
    ```bash
    cmake --preset vs2022-x64
    ```
-   Swap to `build-vs-debug`, `build-vs-release`, or author your own preset if you prefer Ninja/Clang. Enable optional stacks with -DWITH_TORCH=ON, -DWITH_ONNXRUNTIME=ON, or -DWITH_OCL=ON. Double-check CMAKE_PREFIX_PATH; mis-pointed SDKs are a jump-scare no one deserves.
+   Swap to `build-vs-debug`, `build-vs-release`, or author your own preset if you prefer Ninja/Clang. Enable optional stacks with `-DWITH_TORCH=ON`, `-DWITH_ONNXRUNTIME=ON`, `-DWITH_OCL=ON`, or `-DWITH_OCCT=ON` (requires OpenCASCADE). Double-check `CMAKE_PREFIX_PATH`; mis-pointed SDKs are a jump-scare no one deserves.
 
 3. **Build**
    ```bash
@@ -83,6 +83,12 @@ CNCTC is an experimental CNC toolpath playground that pairs a Qt 6 desktop clien
    cmake --build --preset build-vs-release --target package
    ```
    With NSIS on the PATH (makensis), CPack emits AIToolpathGenerator-<version>-win64.exe. Hand that single file to teammates and everyone installs the exact same stack. Low effort, high serotonin.
+
+## STEP/IGES CAD Import (optional)
+
+- Configure with `-DWITH_OCCT=ON` to enable the OpenCASCADE-backed CAD importer. On vcpkg-based setups run `vcpkg install cnctc[occt-importer]` first so the OpenCASCADE targets are discoverable.
+- The desktop app continues to accept OBJ/STL without OCCT; attempting to open STEP/IGES while the feature is disabled surfaces a dialog with the exact flag/package recipe above.
+- `tests/io_step_import.cpp` exercises the tessellation path against `testdata/cad/tiny_block.step`, checking triangle counts and axis-aligned bounds so regressions surface immediately in CI.
 
 ## Training & Data Generation
 

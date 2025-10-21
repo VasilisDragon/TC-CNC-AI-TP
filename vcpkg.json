@@ -13,5 +13,13 @@
     {
       "name": "onnxruntime-gpu"
     }
-  ]
+  ],
+  "features": {
+    "occt-importer": {
+      "description": "Enable OpenCASCADE-based STEP/IGES import.",
+      "dependencies": [
+        "opencascade"
+      ]
+    }
+  }
 }

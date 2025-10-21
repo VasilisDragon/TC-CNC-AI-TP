@@ -26,6 +26,7 @@ find_package(glm CONFIG REQUIRED)
 option(WITH_TORCH "Enable TorchScript inference via LibTorch" OFF)
 option(WITH_ONNXRUNTIME "Enable ONNX Runtime inference" OFF)
 option(WITH_OCL "Enable OpenCAMLib toolpath generation" OFF)
+option(WITH_OCCT "Enable OpenCASCADE-based CAD import" OFF)
 option(WITH_EMBEDDED_TESTS "Embed diagnostics tests in the desktop application" OFF)
 
 set(AI_TORCH_ENABLED OFF CACHE INTERNAL "Enable Torch integration" FORCE)
@@ -88,6 +89,153 @@ if (WITH_OCL)
     endif()
 endif()
 
+set(IO_OCCT_ENABLED OFF CACHE INTERNAL "Enable OCCT CAD import" FORCE)
+if (WITH_OCCT)
+    find_package(OpenCASCADE
+        COMPONENTS
+            FoundationClasses
+            ModelingData
+            ModelingAlgorithms
+            DataExchange
+        QUIET)
+    if (OpenCASCADE_FOUND)
+        message(STATUS "Found OpenCASCADE ${OpenCASCADE_VERSION}")
+        set(IO_OCCT_ENABLED ON CACHE INTERNAL "Enable OCCT CAD import" FORCE)
+        set(OCCT_INCLUDE_DIRS "${OpenCASCADE_INCLUDE_DIR}")
+        set(OCCT_LIBRARIES
+            TKernel
+            TKMath
+            TKG2d
+            TKG3d
+            TKGeomBase
+            TKGeomAlgo
+            TKBRep
+            TKTopAlgo
+            TKPrim
+            TKMesh
+            TKXSBase
+            TKDE
+            TKDEIGES
+            TKDESTEP
+            TKDEOBJ
+            TKDEPLY
+            TKDEVRML
+            TKDECascade
+            TKDEGLTF
+            TKBin
+            TKBinL
+            TKBinTObj
+            TKXml
+            TKXmlL
+            TKXmlTObj
+            TKCAF
+            TKCDF
+            TKLCAF
+            TKTObj
+            TKStd
+            TKStdL
+            TKVCAF
+            TKService
+            TKV3d
+        )
+    else()
+        set(_occt_prefix_candidates)
+        if (DEFINED VCPKG_INSTALLED_DIR)
+            list(APPEND _occt_prefix_candidates
+                "${VCPKG_INSTALLED_DIR}/x64-windows"
+                "${VCPKG_INSTALLED_DIR}/../x64-windows")
+        endif()
+        list(APPEND _occt_prefix_candidates
+            "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows"
+            "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows"
+            "${CMAKE_BINARY_DIR}/../vcpkg_installed/x64-windows")
+
+        foreach(candidate IN LISTS _occt_prefix_candidates)
+            if (NOT candidate)
+                continue()
+            endif()
+            if (EXISTS "${candidate}/include/opencascade")
+                set(_occt_prefix "${candidate}")
+                break()
+            endif()
+        endforeach()
+        unset(_occt_prefix_candidates)
+
+        if (_occt_prefix)
+            set(_occt_lib_names
+                TKernel
+                TKMath
+                TKG2d
+                TKG3d
+                TKGeomBase
+                TKGeomAlgo
+                TKBRep
+                TKTopAlgo
+                TKPrim
+                TKMesh
+                TKXSBase
+                TKDE
+                TKDEIGES
+                TKDESTEP
+                TKDEOBJ
+                TKDEPLY
+                TKDEVRML
+                TKDECascade
+                TKDEGLTF
+                TKBin
+                TKBinL
+                TKBinTObj
+                TKXml
+                TKXmlL
+                TKXmlTObj
+                TKCAF
+                TKCDF
+                TKLCAF
+                TKTObj
+                TKStd
+                TKStdL
+                TKVCAF
+                TKService
+                TKV3d
+            )
+
+            find_path(OCCT_INCLUDE_DIR
+                NAMES
+                    Standard_Type.hxx
+                PATHS
+                    "${_occt_prefix}/include/opencascade"
+                NO_DEFAULT_PATH)
+
+            set(OCCT_LIBRARIES)
+            set(_occt_missing FALSE)
+            foreach(libName IN LISTS _occt_lib_names)
+                find_library(OCCT_LIB_${libName}
+                    NAMES ${libName}
+                    PATHS
+                        "${_occt_prefix}/lib"
+                        "${_occt_prefix}/debug/lib"
+                    NO_DEFAULT_PATH)
+                if (OCCT_LIB_${libName})
+                    list(APPEND OCCT_LIBRARIES "${OCCT_LIB_${libName}}")
+                else()
+                    set(_occt_missing TRUE)
+                    message(DEBUG "OCCT fallback missing library: ${libName}")
+                endif()
+            endforeach()
+
+            if (OCCT_INCLUDE_DIR AND NOT _occt_missing)
+                set(OCCT_INCLUDE_DIRS "${OCCT_INCLUDE_DIR}")
+                set(IO_OCCT_ENABLED ON CACHE INTERNAL "Enable OCCT CAD import" FORCE)
+                message(STATUS "Using OpenCASCADE fallback from ${_occt_prefix}")
+            endif()
+        endif()
+
+        if (NOT IO_OCCT_ENABLED)
+            message(WARNING "WITH_OCCT enabled but OpenCASCADE not found. STEP/IGES import disabled.")
+        endif()
+    endif()
+endif()
+
 set(APP_ENABLED_BACKENDS_LIST "")
 if (AI_TORCH_ENABLED)
     list(APPEND APP_ENABLED_BACKENDS_LIST "Torch")
@@ -97,6 +245,9 @@ if (AI_ONNX_ENABLED)
 endif()
 if (TP_OCL_ENABLED)
     list(APPEND APP_ENABLED_BACKENDS_LIST "OCL")
+endif()
+if (IO_OCCT_ENABLED)
+    list(APPEND APP_ENABLED_BACKENDS_LIST "CAD")
 endif()
 if (APP_ENABLED_BACKENDS_LIST)
     string(JOIN ", " ENABLED_BACKENDS "${APP_ENABLED_BACKENDS_LIST}")
@@ -158,6 +309,7 @@ if (BUILD_TESTING)
     add_executable(basic_sanity_tests
         tests/basic_sanity.cpp
         src/tests_core/basic_toolpath_tests.cpp
+        src/tests_core/unit_system_tests.cpp
     )
     target_include_directories(basic_sanity_tests
         PRIVATE
@@ -192,6 +344,38 @@ if (BUILD_TESTING)
             CNCTC_SOURCE_DIR="${CNCTC_SOURCE_DIR_ESCAPED}"
     )
 
+    if (IO_OCCT_ENABLED)
+        add_executable(io_step_import_tests
+            tests/io_step_import.cpp
+        )
+        target_include_directories(io_step_import_tests
+            PRIVATE
+                ${CMAKE_SOURCE_DIR}/tests
+        )
+        target_link_libraries(io_step_import_tests
+            PRIVATE
+                io
+                render
+        )
+        if (OCCT_LIBRARIES)
+            target_link_libraries(io_step_import_tests
+                PRIVATE
+                    ${OCCT_LIBRARIES}
+            )
+        endif()
+        if (OCCT_INCLUDE_DIRS)
+            target_include_directories(io_step_import_tests
+                PRIVATE
+                    ${OCCT_INCLUDE_DIRS}
+            )
+        endif()
+        target_compile_definitions(io_step_import_tests
+            PRIVATE
+                CNCTC_SOURCE_DIR="${CNCTC_SOURCE_DIR_ESCAPED}"
+        )
+        add_test(NAME io_step_import COMMAND io_step_import_tests)
+    endif()
+
     add_executable(feature_ai_tests
         tests/feature_ai_doctest.cpp
     )
@@ -223,6 +407,24 @@ if (BUILD_TESTING)
             tp
     )
 
+    add_executable(tp_triangle_grid_tests
+        tests/tp_triangle_grid.cpp
+    )
+    target_link_libraries(tp_triangle_grid_tests
+        PRIVATE
+            tp
+            render
+    )
+
+    add_executable(triangle_grid_bench
+        tests/triangle_grid_bench.cpp
+    )
+    target_link_libraries(triangle_grid_bench
+        PRIVATE
+            tp
+            render
+    )
+
     add_executable(tp_entries_raster_tests
         tests/tp_entries_raster.cpp
     )
@@ -235,6 +437,22 @@ if (BUILD_TESTING)
         tests/tp_entries_waterline.cpp
     )
     target_link_libraries(tp_entries_waterline_tests
+        PRIVATE
+            tp
+    )
+
+    add_executable(tp_props_geometry_tests
+        tests/tp_props_geometry.cpp
+    )
+    target_link_libraries(tp_props_geometry_tests
+        PRIVATE
+            tp
+    )
+
+    add_executable(tp_waterline_parallel_consistency_tests
+        tests/waterline_parallel_consistency.cpp
+    )
+    target_link_libraries(tp_waterline_parallel_consistency_tests
         PRIVATE
             tp
     )
@@ -263,6 +481,14 @@ if (BUILD_TESTING)
             tp
     )
 
+    add_executable(post_templates_tests
+        tests/post_templates.cpp
+    )
+    target_link_libraries(post_templates_tests
+        PRIVATE
+            tp
+    )
+
     add_executable(stock_sim_plane_tests
         tests/stock_sim_plane.cpp
     )
@@ -280,21 +506,29 @@ if (BUILD_TESTING)
     add_test(NAME feature_ai COMMAND feature_ai_tests)
     add_test(NAME tp_gouge_step COMMAND tp_gouge_step_tests)
     add_test(NAME tp_gouge_slope COMMAND tp_gouge_slope_tests)
+    add_test(NAME tp_triangle_grid COMMAND tp_triangle_grid_tests)
     add_test(NAME tp_entries_raster COMMAND tp_entries_raster_tests)
     add_test(NAME tp_entries_waterline COMMAND tp_entries_waterline_tests)
+    add_test(NAME tp_props_geometry COMMAND tp_props_geometry_tests)
+    add_test(NAME tp_waterline_parallel_consistency COMMAND tp_waterline_parallel_consistency_tests)
     add_test(NAME post_arcfit_circle COMMAND post_arcfit_circle_tests)
     add_test(NAME post_arcfit_linear COMMAND post_arcfit_linear_tests)
     add_test(NAME post_arcfit_units COMMAND post_arcfit_units_tests)
+    add_test(NAME post_templates COMMAND post_templates_tests)
     add_test(NAME stock_sim_plane COMMAND stock_sim_plane_tests)
 
     set_tests_properties(path_safety PROPERTIES LABELS fast)
     set_tests_properties(headless_pipeline PROPERTIES LABELS fast)
     set_tests_properties(basic_sanity PROPERTIES LABELS fast)
     set_tests_properties(feature_ai PROPERTIES LABELS fast)
+    set_tests_properties(tp_props_geometry PROPERTIES LABELS fast)
+    set_tests_properties(tp_waterline_parallel_consistency PROPERTIES LABELS fast)
     set_tests_properties(post_arcfit_circle PROPERTIES LABELS fast)
     set_tests_properties(post_arcfit_linear PROPERTIES LABELS fast)
     set_tests_properties(post_arcfit_units PROPERTIES LABELS fast)
+    set_tests_properties(post_templates PROPERTIES LABELS fast)
     set_tests_properties(stock_sim_plane PROPERTIES LABELS fast)
+    set_tests_properties(tp_triangle_grid PROPERTIES LABELS fast)
 
     if (TARGET onnx_ai_smoke)
         add_test(NAME onnx_ai_smoke_test COMMAND onnx_ai_smoke)
