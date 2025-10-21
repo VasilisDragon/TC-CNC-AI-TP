@@ -10,88 +10,88 @@ namespace
 constexpr double kMmPerInch = 25.4;
 }
 
-double convertLength(double value, Unit from, Unit to)
+double convertLength(double value, UnitSystem from, UnitSystem to)
 {
     if (from == to)
     {
         return value;
     }
-    if (from == Unit::Inches && to == Unit::Millimeters)
+    if (from == UnitSystem::Inches && to == kInternalUnitSystem)
     {
         return value * kMmPerInch;
     }
-    if (from == Unit::Millimeters && to == Unit::Inches)
+    if (from == kInternalUnitSystem && to == UnitSystem::Inches)
     {
         return value / kMmPerInch;
     }
     return value;
 }
 
-double toMillimeters(double value, Unit from)
+double toMillimeters(double value, UnitSystem from)
 {
-    return convertLength(value, from, Unit::Millimeters);
+    return convertLength(value, from, kInternalUnitSystem);
 }
 
-double fromMillimeters(double valueMm, Unit to)
+double fromMillimeters(double valueMm, UnitSystem to)
 {
-    return convertLength(valueMm, Unit::Millimeters, to);
+    return convertLength(valueMm, kInternalUnitSystem, to);
 }
 
-QString unitName(Unit unit)
+QString unitName(UnitSystem unit)
 {
     switch (unit)
     {
-    case Unit::Millimeters: return QStringLiteral("Millimeters");
-    case Unit::Inches: return QStringLiteral("Inches");
+    case kInternalUnitSystem: return QStringLiteral("Millimeters");
+    case UnitSystem::Inches: return QStringLiteral("Inches");
     }
     return QStringLiteral("Millimeters");
 }
 
-QString unitSuffix(Unit unit)
+QString unitSuffix(UnitSystem unit)
 {
     switch (unit)
     {
-    case Unit::Millimeters: return QStringLiteral("mm");
-    case Unit::Inches: return QStringLiteral("in");
+    case kInternalUnitSystem: return QStringLiteral("mm");
+    case UnitSystem::Inches: return QStringLiteral("in");
     }
     return QStringLiteral("mm");
 }
 
-QString feedSuffix(Unit unit)
+QString feedSuffix(UnitSystem unit)
 {
     switch (unit)
     {
-    case Unit::Millimeters: return QStringLiteral("mm/min");
-    case Unit::Inches: return QStringLiteral("in/min");
+    case kInternalUnitSystem: return QStringLiteral("mm/min");
+    case UnitSystem::Inches: return QStringLiteral("in/min");
     }
     return QStringLiteral("mm/min");
 }
 
-QString unitKey(Unit unit)
+QString unitKey(UnitSystem unit)
 {
     switch (unit)
     {
-    case Unit::Millimeters: return QStringLiteral("mm");
-    case Unit::Inches: return QStringLiteral("inch");
+    case kInternalUnitSystem: return QStringLiteral("mm");
+    case UnitSystem::Inches: return QStringLiteral("inch");
     }
     return QStringLiteral("mm");
 }
 
-Unit unitFromString(const QString& text, Unit fallback)
+UnitSystem unitFromString(const QString& text, UnitSystem fallback)
 {
     const QString lower = text.trimmed().toLower();
     if (lower == QStringLiteral("mm") || lower == QStringLiteral("millimeters") || lower == QStringLiteral("millimetres"))
     {
-        return Unit::Millimeters;
+        return kInternalUnitSystem;
     }
     if (lower == QStringLiteral("inch") || lower == QStringLiteral("inches") || lower == QStringLiteral("in"))
     {
-        return Unit::Inches;
+        return UnitSystem::Inches;
     }
     return fallback;
 }
 
-QString formatLength(double valueMm, Unit unit, int precision)
+QString formatLength(double valueMm, UnitSystem unit, int precision)
 {
     const double displayValue = fromMillimeters(valueMm, unit);
     const QString suffix = unitSuffix(unit);
@@ -101,4 +101,3 @@ QString formatLength(double valueMm, Unit unit, int precision)
 }
 
 } // namespace common
-

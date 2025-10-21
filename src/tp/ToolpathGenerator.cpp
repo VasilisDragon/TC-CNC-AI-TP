@@ -1,6 +1,12 @@
+// ToolpathGenerator.cpp orchestrates the toolpath planning pipeline, translating AI proposals and user
+// preferences into motion primitives that keep benchtop CNC hardware safe without wasting cycle time.
+// The heuristics live here so the reasoning behind each pass (clearance, ramping, caching) stays close
+// to the code that executes it.
+
 #include "tp/ToolpathGenerator.h"
 
-#include "common/logging.h"
+#include "common/Enforce.h"
+#include "common/log.h"
 #include "render/Model.h"
 #include "tp/heightfield/HeightField.h"
 #include "tp/heightfield/UniformGrid.h"
@@ -35,13 +41,18 @@ namespace tp
 
 namespace
 {
-
+// Safety heuristics tuned from shop runs; they bias toward conservative approach feeds so the desktop
+// machines we target clear clamps and ease into material without chatter.
 constexpr double kMinClearanceOffset = 0.25;
 constexpr double kMinSafeGap = 0.5;
 constexpr double kPositionEpsilon = 1e-4;
+// Default ramp angle keeps entry moves <3° so cutters ease into the stock; bounds match safe limits for
+// aluminium on hobby-class routers but still allow aggressive overrides for rigid machines.
 constexpr double kDefaultRampAngleDeg = 3.0;
 constexpr double kMinRampAngleDeg = 0.5;
 constexpr double kMaxRampAngleDeg = 45.0;
+// Lateral ramp factor limits prevent the machine from racing ahead while plunging, so users cannot pick
+// ratios that exceed the travel envelope that our jerk-limited planners can follow.
 constexpr double kMinRampHorizontalFactor = 0.25;
 constexpr double kMaxRampHorizontalFactor = 6.0;
 
@@ -71,11 +82,11 @@ public:
         {
             if (cancelled)
             {
-                common::logInfo(QStringLiteral("%1 cancelled after %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
+                LOG_INFO(Tp, QStringLiteral("%1 cancelled after %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
             }
             else
             {
-                common::logInfo(QStringLiteral("%1 took %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
+                LOG_INFO(Tp, QStringLiteral("%1 took %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
             }
         }
     }
@@ -852,6 +863,8 @@ std::string ToolpathGenerator::makePassLog(const PassProfile& profile, const std
 std::vector<ToolpathGenerator::PassProfile> ToolpathGenerator::buildPassPlan(const UserParams& params,
                                                                              const ai::StrategyDecision& decision)
 {
+    // Clamp derived parameters to the safe range we measured on benchtop routers so AI overrides cannot
+    // push cutters beyond the torque envelope when generating roughing passes.
     const double safeToolDiameter = std::max(params.toolDiameter, 0.1);
     const double userStepOver = (params.stepOver > 0.0) ? params.stepOver : safeToolDiameter * 0.4;
     const double finishStep = std::clamp(userStepOver, 0.1, safeToolDiameter * 0.45);
@@ -887,6 +900,7 @@ std::vector<ToolpathGenerator::PassProfile> ToolpathGenerator::buildPassPlan(con
         }
         const double maxAllowedOver = isFinish ? safeToolDiameter * 0.6 : safeToolDiameter;
         step.stepover = std::clamp(step.stepover, 0.05, maxAllowedOver);
+        ENFORCE(step.stepover > 0.0, "Strategy normalization must produce positive stepover.");
 
         if (step.stepdown <= 0.0)
         {
@@ -896,6 +910,7 @@ std::vector<ToolpathGenerator::PassProfile> ToolpathGenerator::buildPassPlan(con
         {
             step.stepdown = std::max(0.05, step.stepdown);
         }
+        ENFORCE(step.stepdown > 0.0, "Strategy normalization must produce positive stepdown.");
 
         if (step.type == ai::StrategyStep::Type::Raster)
         {
@@ -959,6 +974,8 @@ Toolpath ToolpathGenerator::generate(const render::Model& model,
                                      std::string* bannerMessage) const
 {
     Toolpath toolpath;
+
+    ENFORCE(params.toolDiameter > 0.0, "Tool diameter must be specified before toolpath generation.");
 
     if (!model.isValid())
     {
@@ -1233,26 +1250,28 @@ Toolpath ToolpathGenerator::generateRasterTopography(const render::Model& model,
                           const std::size_t polyCount = toolpath.passes.size();
                           if (cancelled)
                           {
-                              common::logInfo(QStringLiteral("%1 cancelled after %2 ms (polylines=%3)")
-                                                  .arg(label)
-                                                  .arg(ms, 0, 'f', 2)
-                                                  .arg(static_cast<qulonglong>(polyCount)));
+                              LOG_INFO(Tp, QStringLiteral("%1 cancelled after %2 ms (polylines=%3)")
+                                                .arg(label)
+                                                .arg(ms, 0, 'f', 2)
+                                                .arg(static_cast<qulonglong>(polyCount)));
                               return;
                           }
                           if (!completed)
                           {
-                              common::logInfo(QStringLiteral("%1 aborted after %2 ms (polylines=%3, heightfield=%4)")
-                                                  .arg(label)
-                                                  .arg(ms, 0, 'f', 2)
-                                                  .arg(static_cast<qulonglong>(polyCount))
-                                                  .arg(reused ? QStringLiteral("reused") : QStringLiteral("rebuilt")));
+                              LOG_WARN(Tp, QStringLiteral("%1 aborted after %2 ms (polylines=%3, heightfield=%4). "
+                                                          "Review strategy settings before retrying.")
+                                                .arg(label)
+                                                .arg(ms, 0, 'f', 2)
+                                                .arg(static_cast<qulonglong>(polyCount))
+                                                .arg(reused ? QStringLiteral("reused")
+                                                            : QStringLiteral("rebuilt")));
                               return;
                           }
-                          common::logInfo(QStringLiteral("%1 finished in %2 ms (polylines=%3, heightfield=%4)")
-                                              .arg(label)
-                                              .arg(ms, 0, 'f', 2)
-                                              .arg(static_cast<qulonglong>(polyCount))
-                                              .arg(reused ? QStringLiteral("reused") : QStringLiteral("rebuilt")));
+                          LOG_INFO(Tp, QStringLiteral("%1 finished in %2 ms (polylines=%3, heightfield=%4)")
+                                            .arg(label)
+                                            .arg(ms, 0, 'f', 2)
+                                            .arg(static_cast<qulonglong>(polyCount))
+                                            .arg(reused ? QStringLiteral("reused") : QStringLiteral("rebuilt")));
                       },
                       &cancelFlag);
 
@@ -1487,26 +1506,27 @@ Toolpath ToolpathGenerator::generateWaterlineSlicer(const render::Model& model,
                               elapsedMs = ms;
                               if (cancelled)
                               {
-                                  common::logInfo(QStringLiteral("%1 cancelled after %2 ms (loops=%3)")
-                                                      .arg(label)
-                                                      .arg(ms, 0, 'f', 2)
-                                                      .arg(static_cast<qulonglong>(loopCount)));
+                                  LOG_INFO(Tp, QStringLiteral("%1 cancelled after %2 ms (loops=%3)")
+                                                    .arg(label)
+                                                    .arg(ms, 0, 'f', 2)
+                                                    .arg(static_cast<qulonglong>(loopCount)));
                                   return;
                               }
                               if (!completed)
                               {
-                                  common::logInfo(QStringLiteral("%1 aborted after %2 ms (loops=%3, levels=%4)")
-                                                      .arg(label)
-                                                      .arg(ms, 0, 'f', 2)
-                                                      .arg(static_cast<qulonglong>(loopCount))
-                                                      .arg(levelCount));
+                                  LOG_WARN(Tp, QStringLiteral("%1 aborted after %2 ms (loops=%3, levels=%4). "
+                                                              "Inspect stock limits and retry.")
+                                                    .arg(label)
+                                                    .arg(ms, 0, 'f', 2)
+                                                    .arg(static_cast<qulonglong>(loopCount))
+                                                    .arg(levelCount));
                                   return;
                               }
-                              common::logInfo(QStringLiteral("%1 finished in %2 ms (loops=%3, levels=%4)")
-                                                  .arg(label)
-                                                  .arg(ms, 0, 'f', 2)
-                                                  .arg(static_cast<qulonglong>(loopCount))
-                                                  .arg(levelCount));
+                              LOG_INFO(Tp, QStringLiteral("%1 finished in %2 ms (loops=%3, levels=%4)")
+                                                .arg(label)
+                                                .arg(ms, 0, 'f', 2)
+                                                .arg(static_cast<qulonglong>(loopCount))
+                                                .arg(levelCount));
                           },
                           &cancelFlag);
 

@@ -1,15 +1,23 @@
 #include "tp/waterline/ZSlicer.h"
 
+#include "common/log.h"
+
 #include <glm/geometric.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <execution>
+#include <iterator>
 #include <limits>
+#include <numeric>
 #include <unordered_map>
+
+#include <QtCore/QString>
 
 namespace tp::waterline
 {
@@ -60,11 +68,16 @@ double polygonArea(const std::vector<glm::dvec2>& pts)
     }
 
     double area = 0.0;
+    double compensation = 0.0;
     for (std::size_t i = 0; i < pts.size(); ++i)
     {
         const glm::dvec2& a = pts[i];
         const glm::dvec2& b = pts[(i + 1) % pts.size()];
-        area += a.x * b.y - b.x * a.y;
+        const double term = a.x * b.y - b.x * a.y;
+        const double y = term - compensation;
+        const double t = area + y;
+        compensation = (t - area) - y;
+        area = t;
     }
     return 0.5 * area;
 }
@@ -180,7 +193,8 @@ ZSlicer::ZSlicer(const render::Model& model, double toleranceMm)
 
 std::vector<std::vector<glm::dvec3>> ZSlicer::slice(double planeZ,
                                                      double toolRadius,
-                                                     bool applyOffsetForFlat) const
+                                                     bool applyOffsetForFlat,
+                                                     SliceMode mode) const
 {
     struct Segment
     {
@@ -189,22 +203,20 @@ std::vector<std::vector<glm::dvec3>> ZSlicer::slice(double planeZ,
         bool used{false};
     };
 
-    std::vector<Segment> segments;
-    segments.reserve(256);
-
-    const auto addSegment = [&](const glm::dvec2& a, const glm::dvec2& b) {
-        if (lengthSquared(a - b) <= m_tolerance * m_tolerance)
-        {
-            return;
-        }
-        segments.push_back({a, b, false});
-    };
-
-    for (const Triangle& tri : m_triangles)
+    const std::size_t triangleCount = m_triangles.size();
+    if (triangleCount == 0)
     {
+        return {};
+    }
+
+    const double toleranceSq = m_tolerance * m_tolerance;
+
+    const auto computeSegmentsForTriangle = [&](std::size_t triIndex) -> std::vector<Segment> {
+        std::vector<Segment> local;
+        const Triangle& tri = m_triangles[triIndex];
         if (planeZ < tri.minZ - m_tolerance || planeZ > tri.maxZ + m_tolerance)
         {
-            continue;
+            return local;
         }
 
         std::vector<glm::dvec3> intersections;
@@ -255,7 +267,7 @@ std::vector<std::vector<glm::dvec3>> ZSlicer::slice(double planeZ,
             bool duplicate = false;
             for (const glm::dvec3& existing : uniquePoints)
             {
-                if (lengthSquared(glm::dvec2(existing) - glm::dvec2(p)) <= m_tolerance * m_tolerance)
+                if (lengthSquared(glm::dvec2(existing) - glm::dvec2(p)) <= toleranceSq)
                 {
                     duplicate = true;
                     break;
@@ -269,21 +281,65 @@ std::vector<std::vector<glm::dvec3>> ZSlicer::slice(double planeZ,
 
         if (uniquePoints.size() < 2)
         {
-            continue;
+            return local;
         }
+
+        const auto addSegmentLocal = [&](const glm::dvec2& a, const glm::dvec2& b) {
+            if (lengthSquared(a - b) <= toleranceSq)
+            {
+                return;
+            }
+            local.push_back({a, b, false});
+        };
+
         if (uniquePoints.size() == 2)
         {
-            addSegment(glm::dvec2(uniquePoints[0].x, uniquePoints[0].y),
-                       glm::dvec2(uniquePoints[1].x, uniquePoints[1].y));
+            addSegmentLocal(glm::dvec2(uniquePoints[0].x, uniquePoints[0].y),
+                            glm::dvec2(uniquePoints[1].x, uniquePoints[1].y));
         }
         else
         {
             for (std::size_t i = 0; i + 1 < uniquePoints.size(); i += 2)
             {
-                addSegment(glm::dvec2(uniquePoints[i].x, uniquePoints[i].y),
-                           glm::dvec2(uniquePoints[i + 1].x, uniquePoints[i + 1].y));
+                addSegmentLocal(glm::dvec2(uniquePoints[i].x, uniquePoints[i].y),
+                                glm::dvec2(uniquePoints[i + 1].x, uniquePoints[i + 1].y));
             }
         }
+
+        return local;
+    };
+
+    const bool runParallel = (mode == SliceMode::Parallel) && triangleCount >= 128;
+
+    std::vector<std::vector<Segment>> perTriangleSegments(triangleCount);
+    if (runParallel)
+    {
+        std::vector<std::size_t> indices(triangleCount);
+        std::iota(indices.begin(), indices.end(), 0);
+        std::for_each(std::execution::par, indices.begin(), indices.end(), [&](std::size_t index) {
+            perTriangleSegments[index] = computeSegmentsForTriangle(index);
+        });
+    }
+    else
+    {
+        for (std::size_t index = 0; index < triangleCount; ++index)
+        {
+            perTriangleSegments[index] = computeSegmentsForTriangle(index);
+        }
+    }
+
+    std::vector<Segment> segments;
+    std::size_t totalSegments = 0;
+    for (const auto& bucket : perTriangleSegments)
+    {
+        totalSegments += bucket.size();
+    }
+    segments.reserve(std::max<std::size_t>(totalSegments, 256));
+    for (auto& bucket : perTriangleSegments)
+    {
+        segments.insert(segments.end(),
+                        std::make_move_iterator(bucket.begin()),
+                        std::make_move_iterator(bucket.end()));
     }
 
     std::unordered_map<GridKey, std::vector<std::pair<std::size_t, bool>>, GridHash> adjacency;
@@ -438,5 +494,62 @@ std::vector<std::vector<glm::dvec3>> ZSlicer::slice(double planeZ,
 
     return loops3d;
 }
+
+#ifdef TP_ENABLE_ZSLICER_BENCHMARK
+void runZSlicerBenchmark(const ZSlicer& slicer,
+                         double planeZ,
+                         double toolRadius,
+                         bool applyOffsetForFlat,
+                         std::size_t iterations)
+{
+    using clock = std::chrono::steady_clock;
+
+    std::vector<double> timings;
+    timings.reserve(iterations);
+
+    for (std::size_t i = 0; i < iterations; ++i)
+    {
+        const auto start = clock::now();
+        auto loops = slicer.slice(planeZ, toolRadius, applyOffsetForFlat, ZSlicer::SliceMode::Parallel);
+        (void)loops;
+        const auto end = clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(end - start).count();
+        timings.push_back(ms);
+    }
+
+    double sum = 0.0;
+    double compensation = 0.0;
+    for (double value : timings)
+    {
+        const double y = value - compensation;
+        const double t = sum + y;
+        compensation = (t - sum) - y;
+        sum = t;
+    }
+    const double average = (iterations > 0) ? (sum / static_cast<double>(iterations)) : 0.0;
+
+    double minTime = std::numeric_limits<double>::infinity();
+    double maxTime = 0.0;
+    for (double value : timings)
+    {
+        minTime = std::min(minTime, value);
+        maxTime = std::max(maxTime, value);
+    }
+    if (!timings.empty())
+    {
+        LOG_INFO(Tp, QStringLiteral("ZSlicer benchmark completed: %1 iterations (avg=%2 ms, min=%3 ms, max=%4 ms). "
+                                    "Adjust slicing tolerances if the spread is high.")
+                              .arg(static_cast<qulonglong>(iterations))
+                              .arg(average, 0, 'f', 3)
+                              .arg(minTime, 0, 'f', 3)
+                              .arg(maxTime, 0, 'f', 3));
+    }
+    else
+    {
+        LOG_WARN(Tp, QStringLiteral("ZSlicer benchmark skipped: 0 iterations configured. "
+                                    "Set a positive iteration count in the benchmark harness and rerun."));
+    }
+}
+#endif
 
 } // namespace tp::waterline

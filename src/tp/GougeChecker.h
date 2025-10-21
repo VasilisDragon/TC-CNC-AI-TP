@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/Model.h"
+#include "tp/TriangleGrid.h"
 
 #include <glm/vec3.hpp>
 
@@ -47,16 +48,6 @@ public:
                                                     const GougeParams& params) const;
 
 private:
-    struct Triangle
-    {
-        Vec3 a;
-        Vec3 b;
-        Vec3 c;
-        Vec3 normal;
-        Vec3 minBounds;
-        Vec3 maxBounds;
-    };
-
     struct ClosestHit
     {
         bool hit{false};
@@ -65,16 +56,9 @@ private:
     };
 
     [[nodiscard]] ClosestHit closestPoint(const Vec3& point) const;
-    [[nodiscard]] std::vector<std::uint32_t> gatherCandidates(const Vec3& point) const;
 
-    std::vector<Triangle> m_triangles;
-    Vec3 m_minBounds{0.0f};
-    Vec3 m_maxBounds{0.0f};
-    int m_cellsX{1};
-    int m_cellsY{1};
-    double m_invCellSizeX{0.0};
-    double m_invCellSizeY{0.0};
-    std::vector<std::vector<std::uint32_t>> m_grid;
+    TriangleGrid m_grid;
+    mutable std::vector<std::uint32_t> m_candidateScratch;
 };
 
 } // namespace tp

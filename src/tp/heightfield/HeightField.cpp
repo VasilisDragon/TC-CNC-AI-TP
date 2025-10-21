@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-#include "common/logging.h"
+#include "common/log.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QString>
@@ -54,11 +54,11 @@ public:
         {
             if (cancelled)
             {
-                common::logInfo(QStringLiteral("%1 cancelled after %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
+                LOG_INFO(Tp, QStringLiteral("%1 cancelled after %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
             }
             else
             {
-                common::logInfo(QStringLiteral("%1 took %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
+                LOG_INFO(Tp, QStringLiteral("%1 took %2 ms").arg(m_label).arg(ms, 0, 'f', 2));
             }
         }
     }
@@ -187,22 +187,23 @@ bool HeightField::build(const UniformGrid& grid,
 
                               if (cancelled)
                               {
-                                  common::logInfo(QStringLiteral("%1 cancelled after %2 ms (valid=%3/%4, %5%% coverage)")
-                                                      .arg(label)
-                                                      .arg(ms, 0, 'f', 2)
-                                                      .arg(static_cast<qulonglong>(coverageCount))
-                                                      .arg(static_cast<qulonglong>(total))
-                                                      .arg(ratio * 100.0, 0, 'f', 1));
+                                  LOG_INFO(Tp, QStringLiteral("%1 cancelled after %2 ms (valid=%3/%4, %5%% coverage)")
+                                                    .arg(label)
+                                                    .arg(ms, 0, 'f', 2)
+                                                    .arg(static_cast<qulonglong>(coverageCount))
+                                                    .arg(static_cast<qulonglong>(total))
+                                                    .arg(ratio * 100.0, 0, 'f', 1));
                                   return;
                               }
-                              common::logInfo(
-                                  QStringLiteral("%1 completed in %2 ms (valid=%3/%4, %5%% coverage, grid=%6 bytes)")
-                                      .arg(label)
-                                      .arg(ms, 0, 'f', 2)
-                                      .arg(static_cast<qulonglong>(coverageCount))
-                                      .arg(static_cast<qulonglong>(total))
-                                      .arg(ratio * 100.0, 0, 'f', 1)
-                                      .arg(static_cast<qulonglong>(gridBytes)));
+                              LOG_INFO(Tp,
+                                       QStringLiteral(
+                                           "%1 completed in %2 ms (valid=%3/%4, %5%% coverage, grid=%6 bytes)")
+                                           .arg(label)
+                                           .arg(ms, 0, 'f', 2)
+                                           .arg(static_cast<qulonglong>(coverageCount))
+                                           .arg(static_cast<qulonglong>(total))
+                                           .arg(ratio * 100.0, 0, 'f', 1)
+                                           .arg(static_cast<qulonglong>(gridBytes)));
                           },
                           &cancelFlag);
 

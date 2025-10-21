@@ -18,7 +18,10 @@
 #include "io/ImportWorker.h"
 #include "tp/GenerateWorker.h"
 #include "tp/GCodeExporter.h"
+#include "tp/FanucPost.h"
 #include "tp/GRBLPost.h"
+#include "tp/HeidenhainPost.h"
+#include "tp/MarlinPost.h"
 #include "render/Model.h"
 #include "render/ModelViewerWidget.h"
 #include "render/SimulationController.h"
@@ -1488,16 +1491,16 @@ void MainWindow::createUnitMenu(QMenu* viewMenu)
 
     m_unitsMmAction = unitsMenu->addAction(tr("Millimeters"));
     m_unitsMmAction->setCheckable(true);
-    m_unitsMmAction->setData(static_cast<int>(common::Unit::Millimeters));
+    m_unitsMmAction->setData(static_cast<int>(common::UnitSystem::Millimeters));
     m_unitsGroup->addAction(m_unitsMmAction);
 
     m_unitsInAction = unitsMenu->addAction(tr("Inches"));
     m_unitsInAction->setCheckable(true);
-    m_unitsInAction->setData(static_cast<int>(common::Unit::Inches));
+    m_unitsInAction->setData(static_cast<int>(common::UnitSystem::Inches));
     m_unitsGroup->addAction(m_unitsInAction);
 
     connect(m_unitsGroup, &QActionGroup::triggered, this, [this](QAction* action) {
-        const auto unit = static_cast<common::Unit>(action->data().toInt());
+        const auto unit = static_cast<common::UnitSystem>(action->data().toInt());
         applyUnits(unit);
     });
 
@@ -1945,9 +1948,7 @@ double MainWindow::lengthDisplayFromMm(double valueMm) const
 
 double MainWindow::lengthMmFromDisplay(double value) const
 {
-    return (m_units == common::Unit::Millimeters)
-               ? value
-               : common::toMillimeters(value, m_units);
+    return common::toMillimeters(value, m_units);
 }
 
 double MainWindow::feedDisplayFromMmPerMin(double valueMmPerMin) const
@@ -1957,9 +1958,7 @@ double MainWindow::feedDisplayFromMmPerMin(double valueMmPerMin) const
 
 double MainWindow::feedMmPerMinFromDisplay(double value) const
 {
-    return (m_units == common::Unit::Millimeters)
-               ? value
-               : common::toMillimeters(value, m_units);
+    return common::toMillimeters(value, m_units);
 }
 
 void MainWindow::loadToolLibrary()
@@ -2851,14 +2850,14 @@ void MainWindow::onAiComboChanged(int index)
     }
 }
 
-void MainWindow::applyUnits(common::Unit unit, bool fromSettings)
+void MainWindow::applyUnits(common::UnitSystem unit, bool fromSettings)
 {
     if (m_unitsMmAction && m_unitsInAction)
     {
         QSignalBlocker blockMm(m_unitsMmAction);
         QSignalBlocker blockIn(m_unitsInAction);
-        m_unitsMmAction->setChecked(unit == common::Unit::Millimeters);
-        m_unitsInAction->setChecked(unit == common::Unit::Inches);
+        m_unitsMmAction->setChecked(unit == common::UnitSystem::Millimeters);
+        m_unitsInAction->setChecked(unit == common::UnitSystem::Inches);
     }
 
     const bool changed = (m_units != unit);
@@ -3394,7 +3393,10 @@ void MainWindow::saveToolpathToFile()
     };
 
     const std::vector<PostOption> options = {
-        {QStringLiteral("GRBL"), []() { return std::make_unique<tp::GRBLPost>(); }}
+        {QStringLiteral("GRBL"), []() { return std::make_unique<tp::GRBLPost>(); }},
+        {QStringLiteral("Fanuc"), []() { return std::make_unique<tp::FanucPost>(); }},
+        {QStringLiteral("Marlin"), []() { return std::make_unique<tp::MarlinPost>(); }},
+        {QStringLiteral("Heidenhain"), []() { return std::make_unique<tp::HeidenhainPost>(); }}
     };
 
     QDialog dialog(this);
@@ -3791,7 +3793,5 @@ void MainWindow::displayToolpathMessage(const QString& text)
 }
 
 } // namespace app
-
-
 
 

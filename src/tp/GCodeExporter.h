@@ -14,7 +14,7 @@ public:
     static bool exportToFile(const tp::Toolpath& toolpath,
                              const QString& path,
                              IPost& post,
-                             common::Unit units,
+                             common::UnitSystem units,
                              const tp::UserParams& params,
                              QString* error = nullptr);
 };

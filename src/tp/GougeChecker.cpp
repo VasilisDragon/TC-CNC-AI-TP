@@ -13,20 +13,15 @@ namespace
 
 constexpr double kEpsilon = 1e-6;
 
-glm::vec3 toVec3(const QVector3D& v)
+double pointTriangleDistanceSquared(const glm::dvec3& point,
+                                    const glm::dvec3& a,
+                                    const glm::dvec3& b,
+                                    const glm::dvec3& c,
+                                    glm::dvec3& outClosest)
 {
-    return {v.x(), v.y(), v.z()};
-}
-
-double pointTriangleDistanceSquared(const glm::vec3& point,
-                                    const glm::vec3& a,
-                                    const glm::vec3& b,
-                                    const glm::vec3& c,
-                                    glm::vec3& outClosest)
-{
-    const glm::vec3 ab = b - a;
-    const glm::vec3 ac = c - a;
-    const glm::vec3 ap = point - a;
+    const glm::dvec3 ab = b - a;
+    const glm::dvec3 ac = c - a;
+    const glm::dvec3 ap = point - a;
 
     const double d1 = glm::dot(ab, ap);
     const double d2 = glm::dot(ac, ap);
@@ -36,7 +31,7 @@ double pointTriangleDistanceSquared(const glm::vec3& point,
         return glm::dot(ap, ap);
     }
 
-    const glm::vec3 bp = point - b;
+    const glm::dvec3 bp = point - b;
     const double d3 = glm::dot(ab, bp);
     const double d4 = glm::dot(ac, bp);
     if (d3 >= 0.0 && d4 <= d3)
@@ -49,12 +44,12 @@ double pointTriangleDistanceSquared(const glm::vec3& point,
     if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0)
     {
         const double v = d1 / (d1 - d3);
-        outClosest = a + static_cast<float>(v) * ab;
-        const glm::vec3 diff = point - outClosest;
+        outClosest = a + v * ab;
+        const glm::dvec3 diff = point - outClosest;
         return glm::dot(diff, diff);
     }
 
-    const glm::vec3 cp = point - c;
+    const glm::dvec3 cp = point - c;
     const double d5 = glm::dot(ab, cp);
     const double d6 = glm::dot(ac, cp);
     if (d6 >= 0.0 && d5 <= d6)
@@ -67,8 +62,8 @@ double pointTriangleDistanceSquared(const glm::vec3& point,
     if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0)
     {
         const double w = d2 / (d2 - d6);
-        outClosest = a + static_cast<float>(w) * ac;
-        const glm::vec3 diff = point - outClosest;
+        outClosest = a + w * ac;
+        const glm::dvec3 diff = point - outClosest;
         return glm::dot(diff, diff);
     }
 
@@ -76,39 +71,26 @@ double pointTriangleDistanceSquared(const glm::vec3& point,
     if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0)
     {
         const double w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-        outClosest = b + static_cast<float>(w) * (c - b);
-        const glm::vec3 diff = point - outClosest;
+        outClosest = b + w * (c - b);
+        const glm::dvec3 diff = point - outClosest;
         return glm::dot(diff, diff);
     }
 
-    const glm::vec3 n = glm::cross(ab, ac);
+    const glm::dvec3 n = glm::cross(ab, ac);
     const double denom = glm::dot(n, n);
-        if (denom <= kEpsilon)
-        {
-            outClosest = a;
-            const glm::vec3 diff = point - a;
-            return glm::dot(diff, diff);
+    if (denom <= kEpsilon)
+    {
+        outClosest = a;
+        const glm::dvec3 diff = point - a;
+        return glm::dot(diff, diff);
     }
 
     const double v = glm::dot(glm::cross(ap, ac), n) / denom;
     const double w = glm::dot(glm::cross(ab, ap), n) / denom;
     const double u = 1.0 - v - w;
-    outClosest = static_cast<float>(u) * a + static_cast<float>(v) * b + static_cast<float>(w) * c;
-    const glm::vec3 diff = point - outClosest;
+    outClosest = u * a + v * b + w * c;
+    const glm::dvec3 diff = point - outClosest;
     return glm::dot(diff, diff);
-}
-
-int clampIndex(int value, int maxValue)
-{
-    if (value < 0)
-    {
-        return 0;
-    }
-    if (value >= maxValue)
-    {
-        return maxValue - 1;
-    }
-    return value;
 }
 
 } // namespace
@@ -117,168 +99,45 @@ namespace tp
 {
 
 GougeChecker::GougeChecker(const render::Model& model)
+    : m_grid(model, 0.0)
 {
-    const auto& vertices = model.vertices();
-    const auto& indices = model.indices();
-    if (vertices.empty() || indices.empty())
-    {
-        m_grid.resize(1);
-        return;
-    }
-
-    m_triangles.reserve(indices.size() / 3);
-    m_minBounds = toVec3(vertices.front().position);
-    m_maxBounds = m_minBounds;
-
-    for (std::size_t i = 0; i + 2 < indices.size(); i += 3)
-    {
-        const auto ia = static_cast<std::size_t>(indices[i]);
-        const auto ib = static_cast<std::size_t>(indices[i + 1]);
-        const auto ic = static_cast<std::size_t>(indices[i + 2]);
-        if (ia >= vertices.size() || ib >= vertices.size() || ic >= vertices.size())
-        {
-            continue;
-        }
-
-        Triangle triangle;
-        triangle.a = toVec3(vertices[ia].position);
-        triangle.b = toVec3(vertices[ib].position);
-        triangle.c = toVec3(vertices[ic].position);
-        triangle.normal = glm::normalize(glm::cross(triangle.b - triangle.a, triangle.c - triangle.a));
-
-        triangle.minBounds = glm::min(glm::min(triangle.a, triangle.b), triangle.c);
-        triangle.maxBounds = glm::max(glm::max(triangle.a, triangle.b), triangle.c);
-
-        m_minBounds = glm::min(m_minBounds, triangle.minBounds);
-        m_maxBounds = glm::max(m_maxBounds, triangle.maxBounds);
-
-        m_triangles.push_back(triangle);
-    }
-
-    if (m_triangles.empty())
-    {
-        m_grid.resize(1);
-        return;
-    }
-
-    const double spanX = static_cast<double>(m_maxBounds.x - m_minBounds.x);
-    const double spanY = static_cast<double>(m_maxBounds.y - m_minBounds.y);
-    const std::size_t triCount = m_triangles.size();
-
-    const double targetResolution = std::max(4.0, std::sqrt(static_cast<double>(triCount)));
-    m_cellsX = std::max(1, static_cast<int>(std::round(targetResolution)));
-    m_cellsY = m_cellsX;
-
-    if (spanX < kEpsilon)
-    {
-        m_cellsX = 1;
-    }
-    if (spanY < kEpsilon)
-    {
-        m_cellsY = 1;
-    }
-
-    m_grid.assign(static_cast<std::size_t>(m_cellsX * m_cellsY), {});
-
-    const double cellSizeX = (m_cellsX > 0 && spanX >= kEpsilon) ? spanX / static_cast<double>(m_cellsX) : 1.0;
-    const double cellSizeY = (m_cellsY > 0 && spanY >= kEpsilon) ? spanY / static_cast<double>(m_cellsY) : 1.0;
-    m_invCellSizeX = cellSizeX > kEpsilon ? 1.0 / cellSizeX : 0.0;
-    m_invCellSizeY = cellSizeY > kEpsilon ? 1.0 / cellSizeY : 0.0;
-
-    for (std::uint32_t index = 0; index < m_triangles.size(); ++index)
-    {
-        const Triangle& tri = m_triangles[index];
-        const double minX = static_cast<double>(tri.minBounds.x);
-        const double maxX = static_cast<double>(tri.maxBounds.x);
-        const double minY = static_cast<double>(tri.minBounds.y);
-        const double maxY = static_cast<double>(tri.maxBounds.y);
-
-        const int cellMinX = clampIndex(static_cast<int>(std::floor((minX - m_minBounds.x) * m_invCellSizeX)), m_cellsX);
-        const int cellMaxX = clampIndex(static_cast<int>(std::floor((maxX - m_minBounds.x) * m_invCellSizeX)), m_cellsX);
-        const int cellMinY = clampIndex(static_cast<int>(std::floor((minY - m_minBounds.y) * m_invCellSizeY)), m_cellsY);
-        const int cellMaxY = clampIndex(static_cast<int>(std::floor((maxY - m_minBounds.y) * m_invCellSizeY)), m_cellsY);
-
-        for (int ix = cellMinX; ix <= cellMaxX; ++ix)
-        {
-            for (int iy = cellMinY; iy <= cellMaxY; ++iy)
-            {
-                const std::size_t cellIndex = static_cast<std::size_t>(iy * m_cellsX + ix);
-                m_grid[cellIndex].push_back(index);
-            }
-        }
-    }
-}
-
-std::vector<std::uint32_t> GougeChecker::gatherCandidates(const Vec3& point) const
-{
-    if (m_grid.size() <= 1 || m_cellsX <= 1 || m_cellsY <= 1)
-    {
-        std::vector<std::uint32_t> all(m_triangles.size());
-        std::iota(all.begin(), all.end(), 0u);
-        return all;
-    }
-
-    const double localX = (point.x - m_minBounds.x) * m_invCellSizeX;
-    const double localY = (point.y - m_minBounds.y) * m_invCellSizeY;
-
-    int baseX = clampIndex(static_cast<int>(std::floor(localX)), m_cellsX);
-    int baseY = clampIndex(static_cast<int>(std::floor(localY)), m_cellsY);
-
-    std::vector<std::uint32_t> candidates;
-    candidates.reserve(64);
-
-    for (int dx = -1; dx <= 1; ++dx)
-    {
-        const int cx = baseX + dx;
-        if (cx < 0 || cx >= m_cellsX)
-        {
-            continue;
-        }
-        for (int dy = -1; dy <= 1; ++dy)
-        {
-            const int cy = baseY + dy;
-            if (cy < 0 || cy >= m_cellsY)
-            {
-                continue;
-            }
-            const std::size_t cellIndex = static_cast<std::size_t>(cy * m_cellsX + cx);
-            const auto& bucket = m_grid[cellIndex];
-            candidates.insert(candidates.end(), bucket.begin(), bucket.end());
-        }
-    }
-
-    if (candidates.empty())
-    {
-        candidates.resize(m_triangles.size());
-        std::iota(candidates.begin(), candidates.end(), 0u);
-        return candidates;
-    }
-
-    std::sort(candidates.begin(), candidates.end());
-    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
-    return candidates;
+    m_candidateScratch.reserve(128);
 }
 
 GougeChecker::ClosestHit GougeChecker::closestPoint(const Vec3& point) const
 {
     ClosestHit result;
-    if (m_triangles.empty())
+    if (m_grid.empty())
     {
         return result;
     }
 
-    const auto candidates = gatherCandidates(point);
+    glm::dvec3 query(static_cast<double>(point.x), static_cast<double>(point.y), static_cast<double>(point.z));
+
+    auto gatherWithRadius = [&](int radius) {
+        m_grid.gatherCandidatesXY(query.x, query.y, radius, m_candidateScratch);
+        return !m_candidateScratch.empty();
+    };
+
+    if (!gatherWithRadius(1))
+    {
+        if (!gatherWithRadius(2))
+        {
+            gatherWithRadius(3);
+        }
+    }
+
     double bestDist2 = std::numeric_limits<double>::infinity();
-    glm::vec3 bestPoint{0.0f};
+    glm::dvec3 bestPoint{0.0};
     bool found = false;
 
-    for (std::uint32_t index : candidates)
+    for (std::uint32_t index : m_candidateScratch)
     {
-        if (index >= m_triangles.size())
+        if (index >= m_grid.triangleCount())
         {
             continue;
         }
-        const Triangle& tri = m_triangles[index];
+        const TriangleGrid::Triangle& tri = m_grid.triangle(index);
 
         const double verticalComponent = std::abs(tri.normal.z);
         if (verticalComponent <= 0.1)
@@ -286,9 +145,9 @@ GougeChecker::ClosestHit GougeChecker::closestPoint(const Vec3& point) const
             continue;
         }
 
-        glm::vec3 candidatePoint{0.0f};
-        const double dist2 = pointTriangleDistanceSquared(point, tri.a, tri.b, tri.c, candidatePoint);
-        if (candidatePoint.z > static_cast<double>(point.z) + 1e-4)
+        glm::dvec3 candidatePoint{0.0};
+        const double dist2 = pointTriangleDistanceSquared(query, tri.v0, tri.v1, tri.v2, candidatePoint);
+        if (candidatePoint.z > query.z + 1e-4)
         {
             continue;
         }
@@ -302,12 +161,15 @@ GougeChecker::ClosestHit GougeChecker::closestPoint(const Vec3& point) const
 
     if (!found)
     {
+        m_candidateScratch.clear();
         return result;
     }
 
     result.hit = true;
     result.distance = std::sqrt(bestDist2);
-    result.closestPoint = bestPoint;
+    result.closestPoint =
+        Vec3(static_cast<float>(bestPoint.x), static_cast<float>(bestPoint.y), static_cast<float>(bestPoint.z));
+    m_candidateScratch.clear();
     return result;
 }
 
@@ -323,7 +185,7 @@ std::optional<double> GougeChecker::surfaceHeightAt(const Vec3& sample) const
 
 double GougeChecker::minClearanceAlong(const std::vector<Vec3>& path, const GougeParams& params) const
 {
-    if (path.size() < 2 || m_triangles.empty())
+    if (path.size() < 2 || m_grid.empty())
     {
         return std::numeric_limits<double>::infinity();
     }

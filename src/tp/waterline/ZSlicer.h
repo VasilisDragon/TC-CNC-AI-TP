@@ -14,9 +14,23 @@ class ZSlicer
 public:
     explicit ZSlicer(const render::Model& model, double toleranceMm = 1e-4);
 
+    enum class SliceMode
+    {
+        Sequential,
+        Parallel
+    };
+
     std::vector<std::vector<glm::dvec3>> slice(double planeZ,
                                                double toolRadius,
-                                               bool applyOffsetForFlat) const;
+                                               bool applyOffsetForFlat,
+                                               SliceMode mode) const;
+
+    std::vector<std::vector<glm::dvec3>> slice(double planeZ,
+                                               double toolRadius,
+                                               bool applyOffsetForFlat) const
+    {
+        return slice(planeZ, toolRadius, applyOffsetForFlat, SliceMode::Parallel);
+    }
 
     [[nodiscard]] double minZ() const noexcept { return m_minZ; }
     [[nodiscard]] double maxZ() const noexcept { return m_maxZ; }
@@ -36,5 +50,13 @@ private:
     double m_maxZ{0.0};
     std::vector<Triangle> m_triangles;
 };
+
+#ifdef TP_ENABLE_ZSLICER_BENCHMARK
+void runZSlicerBenchmark(const ZSlicer& slicer,
+                         double planeZ,
+                         double toolRadius,
+                         bool applyOffsetForFlat,
+                         std::size_t iterations = 12);
+#endif
 
 } // namespace tp::waterline

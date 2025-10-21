@@ -2,6 +2,8 @@ add_library(tp STATIC
     Toolpath.h
     ToolpathGenerator.h
     ToolpathGenerator.cpp
+    TriangleGrid.h
+    TriangleGrid.cpp
     GougeChecker.h
     GougeChecker.cpp
     Machine.h
@@ -9,8 +11,18 @@ add_library(tp STATIC
     GenerateWorker.h
     GenerateWorker.cpp
     IPost.h
+    TemplateEngine.h
+    TemplateEngine.cpp
+    GCodePostBase.h
+    GCodePostBase.cpp
     GRBLPost.h
     GRBLPost.cpp
+    FanucPost.h
+    FanucPost.cpp
+    MarlinPost.h
+    MarlinPost.cpp
+    HeidenhainPost.h
+    HeidenhainPost.cpp
     GCodeExporter.h
     GCodeExporter.cpp
     Stock.h

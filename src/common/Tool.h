@@ -19,7 +19,7 @@ public:
     [[nodiscard]] bool isValid() const noexcept;
     [[nodiscard]] double recommendedStepOverMm() const noexcept;
     [[nodiscard]] double recommendedMaxDepthMm() const noexcept;
-    [[nodiscard]] QString displayLabel(Unit unit) const;
+    [[nodiscard]] QString displayLabel(UnitSystem unit) const;
 };
 
 } // namespace common

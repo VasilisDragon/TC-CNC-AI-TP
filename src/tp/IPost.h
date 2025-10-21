@@ -18,8 +18,8 @@ public:
 
     virtual std::string name() const = 0;
     virtual std::string generate(const tp::Toolpath& toolpath,
-                             common::Unit units,
-                             const tp::UserParams& params) = 0;
+                                 common::UnitSystem units,
+                                 const tp::UserParams& params) = 0;
 };
 
 } // namespace tp

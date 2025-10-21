@@ -1,3 +1,6 @@
+// ModelManager.cpp coordinates model discovery and lifecycle, making sure the UI and planners always see
+// a coherent set of AI backends. Centralising the directory walking here keeps the rest of the ai module
+// agnostic to on-disk layout changes.
 #include "ai/ModelManager.h"
 
 #include "ai/TorchAI.h"

@@ -1,3 +1,6 @@
+// FeatureExtractor.cpp derives coarse geometric descriptors from meshes so the AI can learn machining
+// strategies without peeking at heavy CAD data; keeping this translation here isolates heuristic tweaks
+// from the inference code paths.
 #include "ai/FeatureExtractor.h"
 
 #include <QtCore/QtMath>
@@ -36,6 +39,8 @@ constexpr float kEpsilon = 1e-6f;
     return value;
 }
 
+// The histogram buckets line up with the slope thresholds we use to choose finishing strategies; keeping
+// them coarse (15° bands) keeps the AI stable even when mesh normals are noisy.
 [[nodiscard]] std::size_t slopeBinIndex(float slopeDeg)
 {
     for (std::size_t i = 0; i + 1 < FeatureExtractor::kSlopeBinBoundariesDeg.size(); ++i)
@@ -209,4 +214,3 @@ std::vector<float> FeatureExtractor::toVector(const GlobalFeatures& features)
 }
 
 } // namespace ai
-

@@ -139,7 +139,7 @@ private:
     QVector3D heatmapColorForError(double errorMm, double cellSizeMm) const;
     QString formatLengthLabel(double valueMm, int precision = 2) const;
     void openAiPreferences();
-    void applyUnits(common::Unit unit, bool fromSettings = false);
+    void applyUnits(common::UnitSystem unit, bool fromSettings = false);
     void updateActiveAiSummary();
     void onSimulationProgressChanged(double normalized);
     void onSimulationStateChanged(render::SimulationController::State state);
@@ -282,7 +282,7 @@ private:
     QString m_lastModelDirectory;
     QString m_aiModelPath;
     QString m_aiModelLabel;
-    common::Unit m_units{common::Unit::Millimeters};
+    common::UnitSystem m_units{common::kInternalUnitSystem};
     QActionGroup* m_unitsGroup{nullptr};
     QAction* m_unitsMmAction{nullptr};
     QAction* m_unitsInAction{nullptr};

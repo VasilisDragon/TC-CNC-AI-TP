@@ -2,22 +2,24 @@
 
 #include "tp/GCodePostBase.h"
 
-#include <string>
 #include <string_view>
 
 namespace tp
 {
 
-class GRBLPost : public GCodePostBase
+class FanucPost : public GCodePostBase
 {
 public:
-    GRBLPost() = default;
+    FanucPost() = default;
 
     std::string name() const override;
 
 protected:
     std::string_view headerTemplate() const override;
     std::string_view footerTemplate() const override;
+    std::string_view workOffset() const override;
+    std::string_view programEndCode() const override;
 };
 
 } // namespace tp
+

@@ -13,6 +13,8 @@ namespace ai
 class FeatureExtractor
 {
 public:
+    // Bins align with common machining breakpoints: 0-15° for flats, 15-30° for shallow walls, etc., so the
+    // planner can map geometry statistics directly to strategy templates.
     static constexpr std::array<float, 6> kSlopeBinBoundariesDeg = {0.0f, 15.0f, 30.0f, 45.0f, 60.0f, 90.1f};
     static constexpr std::size_t kSlopeBinCount = 5;
 
